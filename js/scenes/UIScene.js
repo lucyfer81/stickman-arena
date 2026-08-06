@@ -268,10 +268,22 @@ export class UIScene extends Phaser.Scene {
     this.enemyText.setText(hud.enemiesLeft > 0 ? (hud.enemiesLeft + ' left') : '');
 
     // combo
+    const tierHit = hud.combo >= 5;
     if (hud.combo >= 2) {
       this.comboText.setText('x' + hud.combo + ' COMBO');
       this.comboText.setAlpha(Math.min(1, this.comboText.alpha + 0.2));
       this.comboText.setScale(1 + Math.min(hud.combo, 20) * 0.02);
+      this.comboText.setColor(tierHit ? '#ffd23f' : '#35e1ff');
+      // combo timer bar — shows the remaining combo window so the player knows
+      // when the chain is about to drop
+      const frac = clamp((hud.comboTimer || 0) / (hud.comboWindow || 1), 0, 1);
+      const cw = 220, ch = 9, cxx = CONFIG.WIDTH / 2 - cw / 2, cyy = 182;
+      const calpha = this.comboText.alpha;
+      g.fillStyle(0x000000, 0.4 * calpha);
+      g.fillRoundedRect(cxx - 2, cyy - 2, cw + 4, ch + 4, 4);
+      const ccol = frac > 0.5 ? 0x35e1ff : frac > 0.25 ? 0xffd23f : 0xff3b30;
+      g.fillStyle(ccol, calpha);
+      g.fillRoundedRect(cxx, cyy, Math.max(0, cw * frac), ch, 4);
     } else {
       this.comboText.setAlpha(Math.max(0, this.comboText.alpha - 0.1));
     }

@@ -32,6 +32,7 @@ export class GameScene extends Phaser.Scene {
     this.hitsTaken = 0;
     this.healed = 0;
     this.spawned = { grunt: 0, runner: 0, brute: 0, leaper: 0 };
+    this.tierBonuses = 0;
     this.onboard = { move: false, jump: false, punch: false, kick: false, t: 0 };
 
     this.player = new Player(this, CONFIG.WIDTH / 2, CONFIG.GROUND_Y);
@@ -212,6 +213,7 @@ export class GameScene extends Phaser.Scene {
     if (this.combo >= 3 && this.combo % 1 === 0) {
       this.ui.floatText('x' + this.combo, this.player.x, this.player.y - 220, '#35e1ff', 26);
     }
+    this._checkComboTier();
     if (killed) {
       this.score += Math.round(enemy.v.score * mult);
       this.burst(enemy.x, enemy.y - 70 * enemy.scale, enemy.v.palette.accent, 26);
@@ -248,6 +250,19 @@ export class GameScene extends Phaser.Scene {
       g.lineBetween(x, y, x + Math.cos(a) * r2, y + Math.sin(a) * r2);
     }
     this.time.delayedCall(60, () => this.fxLayer.clear());
+  }
+
+  _checkComboTier() {
+    if (!CONFIG.COMBO_TIERS || !CONFIG.COMBO_TIERS.length) return;
+    if (CONFIG.COMBO_TIERS.indexOf(this.combo) === -1) return;
+    const tierNames = { 5: 'NICE!', 10: 'GREAT!', 15: 'AWESOME!', 20: 'INSANE!', 30: 'GODLIKE!' };
+    const bonus = CONFIG.COMBO_TIER_BONUS;
+    this.score += bonus;
+    this.tierBonuses++;
+    const label = tierNames[this.combo] || ('COMBO x' + this.combo);
+    this.ui.banner(label + '  +' + bonus, '#ffd23f');
+    this.audio && this.audio.combo(this.combo + 4);
+    this.cameras.main.shake(140, 0.012);
   }
 
   // ---- update ----
@@ -375,6 +390,7 @@ export class GameScene extends Phaser.Scene {
       score: this.score, wave: this.wave, combo: this.combo,
       enemiesLeft: alive.length + this.spawnQueue,
       bestCombo: this.bestCombo,
+      comboTimer: this.comboTimer, comboWindow: CONFIG.COMBO_WINDOW,
     });
     if (typeof window !== 'undefined') {
       window.__stickman = {
@@ -387,6 +403,8 @@ export class GameScene extends Phaser.Scene {
         onboard: Object.assign({}, this.onboard),
         variants: counts,
         spawned: Object.assign({}, this.spawned),
+        comboTimer: this.comboTimer,
+        tierBonuses: this.tierBonuses,
       };
     }
   }

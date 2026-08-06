@@ -54,6 +54,8 @@ export const CONFIG = {
   },
 
   COMBO_WINDOW: 2.2,
+  COMBO_TIERS: [5, 10, 15, 20, 30],   // milestone combos -> bonus + banner
+  COMBO_TIER_BONUS: 100,              // flat score bonus per milestone
 };
 
 export const COLORS = {
