@@ -1,4 +1,4 @@
-const { test } = require('@playwright/test');
+const { test, expect } = require('@playwright/test');
 
 const telemetry = (page) => page.evaluate(() => window.__stickman || null);
 
@@ -81,5 +81,30 @@ test.describe('Combat exploit diagnostic (fresh page each)', () => {
     const t = await telemetry(page);
     log('hardcore-150s', t);
     console.log('HARDCORE150 trajectory:', JSON.stringify(traj));
+  });
+  test('leaper punishes jump-spam at high waves', async ({ page }) => {
+    test.setTimeout(120000);
+    await startGame(page);
+    // fast-forward to a wave where leapers spawn (wave >= 4)
+    const ffDeadline = Date.now() + 60000;
+    while (Date.now() < ffDeadline) {
+      await page.evaluate(() => window.__test && window.__test.killEnemies && window.__test.killEnemies());
+      await page.waitForTimeout(120);
+      const t = await telemetry(page);
+      if (t && t.wave >= 6) break;
+    }
+    const before = await telemetry(page);
+    // now jump-spam (the previously-safe strategy) and measure pressure
+    const deadline = Date.now() + 30000;
+    const startHits = before.hitsTaken;
+    while (Date.now() < deadline) {
+      await page.keyboard.down('Space'); await page.waitForTimeout(40); await page.keyboard.up('Space');
+      await page.waitForTimeout(90);
+      const t = await telemetry(page);
+      if (t.state === 'gameover') break;
+    }
+    const t = await telemetry(page);
+    console.log(`LEAPER-JUMPSPAM => wave=${t.wave} hp=${t.health} hitsThisPhase=${t.hitsTaken - startHits} spawned=${JSON.stringify(t.spawned)}`);
+    expect((t.spawned && t.spawned.leaper) || 0).toBeGreaterThan(0);
   });
 });

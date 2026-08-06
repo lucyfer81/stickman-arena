@@ -5,9 +5,11 @@ import { GameScene } from './scenes/GameScene.js';
 import { UIScene } from './scenes/UIScene.js';
 import { GameOverScene } from './scenes/GameOverScene.js';
 import { AudioManager } from './systems/AudioManager.js';
+import { Meta } from './systems/Meta.js';
 
 const audio = new AudioManager();
 window.__audio = audio;
+window.__meta = Meta;
 
 const config = {
   type: Phaser.AUTO,

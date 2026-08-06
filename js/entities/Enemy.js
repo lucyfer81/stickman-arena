@@ -17,6 +17,12 @@ const VARIANTS = {
     palette: { limb: 0xb06bff, joint: 0xd9b3ff, head: 0xecd9ff, accent: 0x8b2fff, fist: 0xd36bff },
     health: 70, speed: 110, damage: 16, scale: 1.22, score: 250, attackReach: 92,
   },
+  leaper: {
+    // anti-air: dives at the player to punish pure jump-spam. Fragile but its
+    // committed leap is tall enough to catch an airborne target.
+    palette: { limb: 0xffb02e, joint: 0xffd98a, head: 0xffeec0, accent: 0xff7a00, fist: 0xffe26b },
+    health: 24, speed: 195, damage: 13, scale: 0.96, score: 220, attackReach: 96,
+  },
 };
 
 export class Enemy extends Stickman {
@@ -45,6 +51,7 @@ export class Enemy extends Stickman {
     this.active = true;
     this.speedMul = 1;
     this.hpMul = 1;
+    this.dmgMul = 1;
     this.aggrMul = 1;     // wave-dependent aggression (lower recover/cooldown)
     this.flankDir = 1;    // desired side relative to player (+1 right / -1 left)
   }
@@ -106,10 +113,15 @@ export class Enemy extends Stickman {
     const a = this.attack;
     if (a.phase !== 'active') return null;
     const reach = this.v.attackReach;
+    if (a.leap) {
+      // tall, body-following hitbox so a jumping target gets caught mid-dive
+      const w = 86, h = 176;
+      return { x: this.x - w / 2, y: this.y - NECK * this.scale - h * 0.5, w, h, dmg: Math.round(this.v.damage * this.dmgMul), kb: CONFIG.ENEMY.KNOCKBACK, from: this.x };
+    }
     const cx = this.x + this.facing * (reach * 0.5 + 6);
     const w = reach;
     const h = 104; // tall enough that a low hop won't fully sidestep the swing
-    return { x: cx - w / 2, y: this.y - NECK * this.scale - h * 0.42, w, h, dmg: this.v.damage, kb: CONFIG.ENEMY.KNOCKBACK, from: this.x };
+    return { x: cx - w / 2, y: this.y - NECK * this.scale - h * 0.42, w, h, dmg: Math.round(this.v.damage * this.dmgMul), kb: CONFIG.ENEMY.KNOCKBACK, from: this.x };
   }
 
   update(dt, player) {
@@ -150,7 +162,8 @@ export class Enemy extends Stickman {
     // desired stand position on the enemy's assigned flank side
     const desiredX = player.x + this.flankDir * reach * 0.55;
     const standoff = Math.abs(this.x - desiredX);
-    const commitRange = reach * 0.82; // wide enough to commit before being disrupted
+    // leaper commits from farther out (it dives to close the gap)
+    const commitRange = reach * (this.variant === 'leaper' ? 1.15 : 0.82);
 
     if (dist > commitRange || standoff > 30) {
       // reposition toward the flank slot (keeps enemies on both sides)
@@ -175,14 +188,15 @@ export class Enemy extends Stickman {
   }
 
   _startAttack() {
-    const v = this.v;
     const aggr = this.aggrMul;
     const windupFloor = CONFIG.ENEMY.ATTACK_WINDUP * 0.62; // keep it readable
+    const leap = this.variant === 'leaper';
     this.attack = {
       phase: 'windup',
       t: 0,
+      leap,
       windup: Math.max(windupFloor, CONFIG.ENEMY.ATTACK_WINDUP * (this.variant === 'brute' ? 1.15 : 1) / aggr),
-      active: CONFIG.ENEMY.ATTACK_ACTIVE,
+      active: leap ? 0.4 : CONFIG.ENEMY.ATTACK_ACTIVE,
       recover: CONFIG.ENEMY.ATTACK_RECOVER * (this.variant === 'brute' ? 1.25 : 1) / aggr,
     };
     this.state = 'punch';
@@ -196,10 +210,17 @@ export class Enemy extends Stickman {
       this.glow = clamp01(a.t / a.windup) * 0.9;
       if (a.t >= a.windup) {
         a.phase = 'active'; a.t = 0; this.glow = 1;
-        // LUNGE: commit forward so the swing actually reaches a backing/dodging
-        // target instead of whiffing in place. Scales with wave for late pressure.
-        const lunge = (this.variant === 'brute' ? 180 : 240) + this.aggrMul * 60;
-        this.vx = this.facing * lunge;
+        if (a.leap) {
+          // ANTI-AIR DIVE: launch toward the player's current position. The arc
+          // + tall hitbox catches jump-spammers who'd otherwise be untouchable.
+          this.vx = this.facing * 460;
+          this.vy = -840;
+          this.onGround = false;
+        } else {
+          // LUNGE: commit forward so the swing reaches a backing/dodging target.
+          const lunge = (this.variant === 'brute' ? 180 : 240) + this.aggrMul * 60;
+          this.vx = this.facing * lunge;
+        }
       }
     }
     else if (a.phase === 'active' && a.t >= a.active) { a.phase = 'recover'; a.t = 0; this.glow = 0.3; }
@@ -234,6 +255,9 @@ export class Enemy extends Stickman {
     let anim;
     if (this.dead) {
       anim = { state: 'dead', time: this.animTime, deadT: this.deadT };
+    } else if (this.attack && this.attack.leap) {
+      // a diving leaper reads as an airborne tuck, not a grounded punch
+      anim = { state: 'jump', vy: -this.vy };
     } else if (this.attack) {
       anim = { state: 'punch', phase: this._attackPhase01() };
     } else if (this.state === 'hurt') {

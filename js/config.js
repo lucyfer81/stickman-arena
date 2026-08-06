@@ -54,6 +54,15 @@ export const CONFIG = {
   },
 
   COMBO_WINDOW: 2.2,
+  COMBO_TIERS: [5, 10, 15, 20, 30],   // milestone combos -> bonus + banner
+  COMBO_TIER_BONUS: 100,              // flat score bonus per milestone
+};
+
+// Difficulty presets — multiplied into enemy stats at spawn + player HP.
+export const DIFFICULTY = {
+  easy:   { label: 'EASY',   enemyHp: 0.80, enemySpeed: 0.90, enemyDmg: 0.80, aggr: 0.85, playerHp: 120, color: '#6bff9e' },
+  normal: { label: 'NORMAL', enemyHp: 1.00, enemySpeed: 1.00, enemyDmg: 1.00, aggr: 1.00, playerHp: 100, color: '#35e1ff' },
+  hard:   { label: 'HARD',   enemyHp: 1.20, enemySpeed: 1.10, enemyDmg: 1.20, aggr: 1.20, playerHp: 90,  color: '#ff6f5c' },
 };
 
 export const COLORS = {
