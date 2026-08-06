@@ -2,14 +2,22 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#0b0e16">
+    <meta name="description" content="Stickman Arena - a tiny polished stickman brawler.">
     <title>Stickman Arena</title>
+    <link rel="icon" href="assets/svg/favicon.svg">
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-    <div id="game">
-        <canvas id="canvas"></canvas>
+    <div id="game"></div>
+    <div id="rotate-hint">
+        <div class="rh-inner">
+            <div class="rh-icon">&#x21BB;</div>
+            <div>Rotate your device<br>for the best experience</div>
+        </div>
     </div>
-    <script src="js/main.js"></script>
+    <script src="assets/lib/phaser.min.js"></script>
+    <script type="module" src="js/main.js"></script>
 </body>
 </html>

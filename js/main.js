@@ -1,17 +1,45 @@
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
+import { CONFIG } from './config.js';
+import { BootScene } from './scenes/BootScene.js';
+import { TitleScene } from './scenes/TitleScene.js';
+import { GameScene } from './scenes/GameScene.js';
+import { UIScene } from './scenes/UIScene.js';
+import { GameOverScene } from './scenes/GameOverScene.js';
+import { AudioManager } from './systems/AudioManager.js';
 
-function resize() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-}
+const audio = new AudioManager();
+window.__audio = audio;
 
-window.addEventListener('resize', resize);
-resize();
+const config = {
+  type: Phaser.AUTO,
+  parent: 'game',
+  backgroundColor: '#0b0e16',
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width: CONFIG.WIDTH,
+    height: CONFIG.HEIGHT,
+  },
+  render: {
+    antialias: true,
+    roundPixels: false,
+  },
+  input: {
+    activePointers: 3,
+  },
+  physics: { default: 'arcade' },
+  scene: [BootScene, TitleScene, GameScene, UIScene, GameOverScene],
+};
 
-function loop() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    requestAnimationFrame(loop);
-}
+const game = new Phaser.Game(config);
+game.registry.set('audio', audio);
 
-loop();
+// resume audio on first interaction
+const resumeOnce = () => {
+  audio.resume();
+  window.removeEventListener('pointerdown', resumeOnce);
+  window.removeEventListener('keydown', resumeOnce);
+};
+window.addEventListener('pointerdown', resumeOnce);
+window.addEventListener('keydown', resumeOnce);
+
+window.addEventListener('beforeunload', () => game.destroy(true));

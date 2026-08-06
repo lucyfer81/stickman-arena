@@ -1,0 +1,14 @@
+{
+  "name": "stickman-arena",
+  "version": "1.0.0",
+  "description": "A 2D stickman fighting arena game built with Phaser 3.",
+  "private": true,
+  "scripts": {
+    "serve": "python3 -m http.server 8080",
+    "test": "playwright test",
+    "test:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0"
+  }
+}
