@@ -64,3 +64,34 @@ Enjoyment: 3/10 · Retention forecast: terrible (churn at first session)
 
 ## Fix order
 1 (difficulty/threat) → 2 (onboarding) → 3 (pacing) → 5 (depth) → 4 (mobile) → iterate.
+
+## Results after fixes (same 4-persona playthroughs)
+
+| Persona | Metric | Before | After |
+|---|---|---|---|
+| First-time (AFK 30s) | onboarding hints | none | progressive chips shown |
+| Casual (60s) | damage taken | 0 (100 HP) | 3 hits (75 HP) |
+| Hardcore (90s) | damage taken | 0 (100 HP) | 6 hits, +50 healed (93 HP) |
+| Hardcore (150s) | damage taken | n/a | 7 hits, reaches wave 5 |
+| All | dead time between waves | 1.6–1.8s breaks | 1.0–1.1s breaks |
+| Hardcore (90s) | wave reached | 3 | 4 |
+| Mobile | action buttons | r50–64, tight zones | r58–74, 2.5× forgiving zones |
+
+Core test suite: 5/5 passing (desktop ×3, mobile-landscape, mobile-portrait).
+
+### What changed (commits on `agent-dev`)
+1. **Combat threat** — flanking AI, hyper-armor through committed swings, a
+   recover-phase punish window, firstStrike commit-on-arrival, attack lunge,
+   taller hitbox, windup telegraph, steeper wave scaling.
+2. **Onboarding** — progressive control-hint chips that dim per action.
+3. **Pacing** — tighter wave breaks + faster spawns.
+4. **Mobile** — bigger buttons + forgiving touch zones.
+5. **UX** — brief input lockout on Game Over.
+
+### Remaining (post-launch backlog)
+- #6 difficulty select / adaptive ramp
+- #7 combo timer UI + reward tiers
+- #8 meta-progression (unlocks, daily challenge)
+- #10 audio volume control (mute-only today)
+- #5 depth: a ranged/jumping enemy to punish pure jump-spam
+
