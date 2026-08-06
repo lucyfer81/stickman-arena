@@ -62,11 +62,12 @@ export class UIScene extends Phaser.Scene {
     this.touchGroup.add([this.joyBase, this.joyKnob]);
     this._drawJoy();
 
-    // right-side action buttons
-    const by = CONFIG.HEIGHT - 92;
-    this.btnPunch = this._makeBtn(CONFIG.WIDTH - 214, by, 56, 'PUNCH', 0xffd23f);
-    this.btnKick = this._makeBtn(CONFIG.WIDTH - 120, by - 38, 64, 'KICK', 0xff6f5c);
-    this.btnJump = this._makeBtn(CONFIG.WIDTH - 214, by - 64, 50, 'JUMP', 0x35e1ff);
+    // right-side action buttons — sized for thumbs; interactive zone is larger
+    // than the visual so near-misses still register (forgiving touch).
+    const by = CONFIG.HEIGHT - 84;
+    this.btnJump = this._makeBtn(CONFIG.WIDTH - 224, by - 70, 58, 'JUMP', 0x35e1ff);
+    this.btnPunch = this._makeBtn(CONFIG.WIDTH - 236, by, 66, 'PUNCH', 0xffd23f);
+    this.btnKick = this._makeBtn(CONFIG.WIDTH - 110, by - 30, 74, 'KICK', 0xff6f5c);
 
     this.input.addPointer(2);
 
@@ -142,9 +143,10 @@ export class UIScene extends Phaser.Scene {
     c.setPosition(x, y);
     draw(false);
     const t = this.add.text(x, y, label, {
-      fontFamily: 'Arial Black', fontSize: '13px', color: '#ffffff',
+      fontFamily: 'Arial Black', fontSize: '14px', color: '#ffffff',
     }).setOrigin(0.5);
-    const zone = this.add.zone(x, y, r * 2, r * 2).setInteractive();
+    // interactive zone is generously larger than the visual circle
+    const zone = this.add.zone(x, y, r * 2.5, r * 2.5).setInteractive();
     const c2 = this.gameScene.controls;
     const setFlag = (down) => {
       if (label === 'JUMP') { if (down) { c2.jumpPressed = true; c2.jumpHeldTouch = true; } else c2.jumpHeldTouch = false; }
