@@ -1,23 +1,67 @@
 # stickman-arena
 
-火柴人格斗竞技场游戏。
+A polished, browser-based **2D stickman brawler** built with **Phaser 3 + vanilla ES Modules**. No build step, no backend, no runtime network calls — 100% static. Deploy it anywhere (GitHub Pages, Netlify, any static host).
 
-## 项目结构
+Fight endless waves of stickman enemies, build combos, grab health drops, and chase a high score.
+
+## Play
+
+- **Move:** `A`/`D` or `←`/`→`
+- **Jump:** `W` / `Space` (short hop if tapped, full jump if held — with coyote-time + jump-buffering)
+- **Punch:** `J` (fast, light)
+- **Kick:** `K` (slow, heavy, big knockback)
+- **Pause:** `Esc`
+- **Mobile:** on-screen **virtual joystick** (bottom-left) + **Jump / Punch / Kick** buttons (bottom-right). Landscape recommended.
+
+Attacks auto-face the nearest enemy. Chain hits within the combo window to multiply your score.
+
+## Run locally
+
+```bash
+npm install            # installs Playwright
+npm test               # runs Playwright tests (desktop + mobile viewports)
+# or just serve and play:
+python3 -m http.server 8080   # open http://localhost:8080
+```
+
+## Deploy to GitHub Pages (one-time, ~30 seconds)
+
+The site is fully static with all relative paths + a `.nojekyll` file, so it works as a **project page**:
+
+1. Push `main` (already done).
+2. Repo **Settings → Pages → Source: Deploy from a branch** → Branch: **`main`** / **`/ (root)`** → Save.
+3. Wait ~1 min → your game is live at `https://<user>.github.io/stickman-arena/`.
+
+## Features
+
+- **Procedural everything** — stickmen drawn from a skeletal rig (no sprites); all animation is math-driven (idle breathe, run cycle, jump tuck, punch/kick extension, hurt, death ragdoll). Audio is synthesized with WebAudio (no audio files). Background is generated (gradient sky, parallax skyline, moon glow, perspective floor grid, drifting embers).
+- **3 enemy types** — grunt (balanced), runner (fast/fragile), brute (tank) — with pursuit + attack AI and telegraphs.
+- **Wave progression** with scaling difficulty and between-wave breaks.
+- **Game feel** — hit-pause (freeze frames), screen shake, particle bursts, hit sparks, floating combo/score text, kill slow-motion, landing dust, squash feel, enemy hurt-flash + knockback.
+- **Full loop** — title screen → gameplay → game over → restart, with persistent high score (`localStorage`).
+- **Responsive** — Phaser FIT scaling; portrait phones get a friendly "rotate device" hint.
+
+## Project structure
 
 ```
-stickman-arena/
-├── index.html        # 入口页面
-├── css/              # 样式
-├── js/               # 游戏逻辑
-├── assets/
-│   ├── svg/          # 矢量图形
-│   ├── effects/      # 特效
-│   └── audio/        # 音频
-├── tests/            # 测试
-├── notes.md          # 开发笔记
-└── README.md
+index.html              entry (loads local Phaser + main.js module)
+css/style.css           layout + rotate-hint
+js/
+  main.js               Phaser config + scene registration + audio singleton
+  config.js             constants & palette
+  scenes/               Boot, Title, Game, UI, GameOver
+  entities/             Stickman (rig), Player, Enemy, Pickup
+  systems/AudioManager  procedural WebAudio sfx
+  utils/                math, background
+assets/
+  lib/phaser.min.js     Phaser 3.80.1 bundled locally (no CDN at runtime)
+  svg/favicon.svg
+tests/                  Playwright specs (desktop + mobile-landscape + mobile-portrait)
+tools/                  QA helpers (imgstat.py, ascii.py) — visual analysis w/o a display
+notes.md                dev log
 ```
 
-## 开发
+## Notes
 
-开发在 `agent-dev` 分支进行，测试通过后合并回 `main`。
+- All art is generated in-repo; nothing is downloaded from the internet at runtime.
+- `notes.md` documents the build journey, decisions, and bugs fixed.
