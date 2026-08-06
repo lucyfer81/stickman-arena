@@ -1,4 +1,4 @@
-import { CONFIG } from '../config.js';
+import { CONFIG, DIFFICULTY } from '../config.js';
 import { Player } from '../entities/Player.js';
 import { Enemy } from '../entities/Enemy.js';
 import { Pickup } from '../entities/Pickup.js';
@@ -35,8 +35,14 @@ export class GameScene extends Phaser.Scene {
     this.tierBonuses = 0;
     this.onboard = { move: false, jump: false, punch: false, kick: false, t: 0 };
 
+    // difficulty preset (chosen on the title screen; persists)
+    const diffKey = this.registry.get('difficulty') || 'normal';
+    this.diff = DIFFICULTY[diffKey] || DIFFICULTY.normal;
+
     this.player = new Player(this, CONFIG.WIDTH / 2, CONFIG.GROUND_Y);
     this.player.facing = 1;
+    this.player.maxHealth = this.diff.playerHp;
+    this.player.health = this.diff.playerHp;
 
     // shared control state (also written by UIScene touch controls)
     this.controls = {
@@ -154,10 +160,13 @@ export class GameScene extends Phaser.Scene {
     // flank assignment: alternating sides, seeded by spawn side, so the pack
     // surrounds the player rather than stacking on one side.
     e.flankDir = (this.enemies.length % 2 === 0) ? (fromLeft ? 1 : -1) : (fromLeft ? -1 : 1);
-    // wave-based scaling — steeper so late waves actually threaten
-    e.speedMul = 1 + Math.min(n, 15) * 0.045;
-    e.hpMul = 1 + Math.min(n, 15) * 0.075;
-    e.aggrMul = 0.8 + Math.min(n - 1, 8) * 0.07; // wave1 gentle, wave9+ fierce
+    // wave-based scaling — steeper so late waves actually threaten; difficulty
+    // preset multiplies on top so Easy/Hard shift the whole curve.
+    const d = this.diff;
+    e.speedMul = (1 + Math.min(n, 15) * 0.045) * d.enemySpeed;
+    e.hpMul = (1 + Math.min(n, 15) * 0.075) * d.enemyHp;
+    e.aggrMul = (0.8 + Math.min(n - 1, 8) * 0.07) * d.aggr; // wave1 gentle, wave9+ fierce
+    e.dmgMul = d.enemyDmg;
     e.health = e.maxHealth = e.maxHealth * e.hpMul;
     this.enemies.push(e);
   }
@@ -405,6 +414,7 @@ export class GameScene extends Phaser.Scene {
         spawned: Object.assign({}, this.spawned),
         comboTimer: this.comboTimer,
         tierBonuses: this.tierBonuses,
+        difficulty: this.diff && this.diff.label,
       };
     }
   }

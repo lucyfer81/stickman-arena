@@ -1,6 +1,8 @@
-import { CONFIG, COLORS } from '../config.js';
+import { CONFIG, COLORS, DIFFICULTY } from '../config.js';
 import { Stickman } from '../entities/Stickman.js';
 import { drawBackground } from '../utils/background.js';
+
+const DIFF_ORDER = ['easy', 'normal', 'hard'];
 
 export class TitleScene extends Phaser.Scene {
   constructor() { super('Title'); }
@@ -17,6 +19,11 @@ export class TitleScene extends Phaser.Scene {
     this.t = 0;
     this.demoAction = 0;
 
+    // difficulty (persists)
+    this.difficulty = localStorage.getItem('stickman_arena_diff') || 'normal';
+    if (!DIFFICULTY[this.difficulty]) this.difficulty = 'normal';
+    this.registry.set('difficulty', this.difficulty);
+
     // title
     const title = this.add.text(cx, 170, 'STICKMAN ARENA', {
       fontFamily: 'Impact, Arial Black, sans-serif',
@@ -32,6 +39,19 @@ export class TitleScene extends Phaser.Scene {
       fontSize: '24px',
       color: '#7fb6d6',
     }).setOrigin(0.5);
+
+    // difficulty selector — click to cycle Easy -> Normal -> Hard
+    this.diffLabel = this.add.text(cx, CONFIG.HEIGHT - 200, '', {
+      fontFamily: 'Arial Black', fontSize: '22px', color: '#ffffff',
+      stroke: '#0b1a2a', strokeThickness: 5,
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    this._refreshDiff();
+    // hit-test rectangle for guarding the global tap-to-start handler
+    this.diffRect = new Phaser.Geom.Rectangle(0, 0, 240, 48).setTo(cx - 120, CONFIG.HEIGHT - 224);
+    this.diffLabel.on('pointerdown', (pointer, localX, localY, event) => {
+      event && event.stopPropagation();
+      this._cycleDiff();
+    });
 
     this.subtitle = this.add.text(cx, CONFIG.HEIGHT - 150, 'PRESS  SPACE  /  TAP  TO  START', {
       fontFamily: 'Arial Black',
@@ -59,13 +79,41 @@ export class TitleScene extends Phaser.Scene {
       }).setOrigin(0.5);
     }
 
-    // input
+    // input — tap anywhere to start, EXCEPT on the difficulty selector
     this.input.keyboard.on('keydown-SPACE', () => this.start());
     this.input.keyboard.on('keydown-ENTER', () => this.start());
-    this.input.on('pointerdown', () => this.start());
+    this.input.keyboard.on('keydown-ONE', () => this._setDiff('easy'));
+    this.input.keyboard.on('keydown-TWO', () => this._setDiff('normal'));
+    this.input.keyboard.on('keydown-THREE', () => this._setDiff('hard'));
+    this.input.on('pointerdown', (pointer) => {
+      if (this.diffRect && this.diffRect.contains(pointer.x, pointer.y)) return;
+      this.start();
+    });
 
     this.cameras.main.fadeIn(300);
-    if (typeof window !== 'undefined') window.__stickman = { state: 'title' };
+    if (typeof window !== 'undefined') window.__stickman = { state: 'title', difficulty: this.difficulty };
+  }
+
+  _refreshDiff() {
+    const d = DIFFICULTY[this.difficulty];
+    const idx = DIFF_ORDER.indexOf(this.difficulty);
+    this.diffLabel.setText('\u25C0  ' + d.label + '  \u25B6');
+    this.diffLabel.setColor(d.color);
+    this.registry.set('difficulty', this.difficulty);
+    if (typeof window !== 'undefined') window.__stickman = Object.assign({}, window.__stickman, { difficulty: this.difficulty });
+    this.audio && this.audio.ui();
+  }
+  _cycleDiff() {
+    const idx = DIFF_ORDER.indexOf(this.difficulty);
+    this.difficulty = DIFF_ORDER[(idx + 1) % DIFF_ORDER.length];
+    localStorage.setItem('stickman_arena_diff', this.difficulty);
+    this._refreshDiff();
+  }
+  _setDiff(k) {
+    if (!DIFFICULTY[k]) return;
+    this.difficulty = k;
+    localStorage.setItem('stickman_arena_diff', k);
+    this._refreshDiff();
   }
 
   start() {

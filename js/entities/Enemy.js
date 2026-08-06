@@ -51,6 +51,7 @@ export class Enemy extends Stickman {
     this.active = true;
     this.speedMul = 1;
     this.hpMul = 1;
+    this.dmgMul = 1;
     this.aggrMul = 1;     // wave-dependent aggression (lower recover/cooldown)
     this.flankDir = 1;    // desired side relative to player (+1 right / -1 left)
   }
@@ -115,12 +116,12 @@ export class Enemy extends Stickman {
     if (a.leap) {
       // tall, body-following hitbox so a jumping target gets caught mid-dive
       const w = 86, h = 176;
-      return { x: this.x - w / 2, y: this.y - NECK * this.scale - h * 0.5, w, h, dmg: this.v.damage, kb: CONFIG.ENEMY.KNOCKBACK, from: this.x };
+      return { x: this.x - w / 2, y: this.y - NECK * this.scale - h * 0.5, w, h, dmg: Math.round(this.v.damage * this.dmgMul), kb: CONFIG.ENEMY.KNOCKBACK, from: this.x };
     }
     const cx = this.x + this.facing * (reach * 0.5 + 6);
     const w = reach;
     const h = 104; // tall enough that a low hop won't fully sidestep the swing
-    return { x: cx - w / 2, y: this.y - NECK * this.scale - h * 0.42, w, h, dmg: this.v.damage, kb: CONFIG.ENEMY.KNOCKBACK, from: this.x };
+    return { x: cx - w / 2, y: this.y - NECK * this.scale - h * 0.42, w, h, dmg: Math.round(this.v.damage * this.dmgMul), kb: CONFIG.ENEMY.KNOCKBACK, from: this.x };
   }
 
   update(dt, player) {
