@@ -31,6 +31,7 @@ export class GameScene extends Phaser.Scene {
     this.gameOver = false;
     this.hitsTaken = 0;
     this.healed = 0;
+    this.onboard = { move: false, jump: false, punch: false, kick: false, t: 0 };
 
     this.player = new Player(this, CONFIG.WIDTH / 2, CONFIG.GROUND_Y);
     this.player.facing = 1;
@@ -273,9 +274,13 @@ export class GameScene extends Phaser.Scene {
     c.dir = c.touchActive ? c.touchDir : kbDir;
     c.jumpHeld = c.jumpHeldTouch || kbJumpHeld;
 
-    if (c.punchPressed) { p_tryAttack(this, 'punch'); c.punchPressed = false; }
-    if (c.kickPressed) { p_tryAttack(this, 'kick'); c.kickPressed = false; }
-    if (c.jumpPressed) { c.jumpPressed = false; }
+    // progressive onboarding: flag each action the first time it's used
+    const ob = this.onboard;
+    ob.t += dt;
+    if (c.dir !== 0) ob.move = true;
+    if (c.punchPressed) { p_tryAttack(this, 'punch'); c.punchPressed = false; ob.punch = true; }
+    if (c.kickPressed) { p_tryAttack(this, 'kick'); c.kickPressed = false; ob.kick = true; }
+    if (c.jumpPressed) { c.jumpPressed = false; ob.jump = true; }
 
     // slow-motion right after a kill
     let stepDt = dt;
@@ -374,6 +379,7 @@ export class GameScene extends Phaser.Scene {
         enemiesAlive: alive, spawnQueue: this.spawnQueue,
         waveActive: this.waveActive,
         hitsTaken: this.hitsTaken, healed: this.healed,
+        onboard: Object.assign({}, this.onboard),
       };
     }
   }

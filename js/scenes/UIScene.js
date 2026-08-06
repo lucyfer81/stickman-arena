@@ -35,6 +35,7 @@ export class UIScene extends Phaser.Scene {
     this._buildTouchControls();
     this._buildPauseOverlay();
     this._buildMute();
+    this._buildOnboarding();
 
     this.floats = [];
     this._touchVisible = false;
@@ -186,6 +187,34 @@ export class UIScene extends Phaser.Scene {
 
   setPaused(p) { this.pauseOverlay.setVisible(p); }
 
+  _buildOnboarding() {
+    // Progressive control hints shown at game start (desktop only — on touch the
+    // on-screen buttons are already self-labeled). Each chip dims as the player
+    // performs that action; the whole row fades out once all are done, after a
+    // timeout, or when the player reaches wave 2.
+    this.onboardChips = null;
+    if (this._touchVisible) return;
+    const hints = [['MOVE', 'A  D'], ['JUMP', 'W'], ['PUNCH', 'J'], ['KICK', 'K']];
+    const y = CONFIG.HEIGHT - 150;
+    this.onboardGroup = this.add.container(0, 0).setDepth(115);
+    this.onboardChips = [];
+    const gap = 190;
+    const totalW = gap * (hints.length - 1);
+    hints.forEach(([label, key], i) => {
+      const cx = CONFIG.WIDTH / 2 - totalW / 2 + i * gap;
+      const k = this.add.text(cx, y, key, {
+        fontFamily: 'Arial Black', fontSize: '22px', color: '#ffd23f',
+        stroke: '#0b1a2a', strokeThickness: 5,
+      }).setOrigin(0.5);
+      const l = this.add.text(cx, y + 24, label, {
+        fontFamily: 'Arial', fontSize: '14px', color: '#9bb4c8',
+      }).setOrigin(0.5);
+      this.onboardChips.push({ key: k, label: l, action: ['MOVE', 'JUMP', 'PUNCH', 'KICK'][i] });
+      this.onboardGroup.add([k, l]);
+    });
+    this.onboardAlpha = 0;
+  }
+
   banner(text, color = '#ffffff') {
     const b = this.bannerText;
     b.setText(text);
@@ -243,6 +272,29 @@ export class UIScene extends Phaser.Scene {
       this.comboText.setScale(1 + Math.min(hud.combo, 20) * 0.02);
     } else {
       this.comboText.setAlpha(Math.max(0, this.comboText.alpha - 0.1));
+    }
+
+    this._updateOnboarding();
+  }
+
+  _updateOnboarding() {
+    const gs = this.gameScene;
+    const ob = gs && gs.onboard;
+    if (!ob || !this.onboardChips) return;
+    const allDone = ob.move && ob.jump && ob.punch && ob.kick;
+    const expired = ob.t > 16;
+    const pastIntro = gs.wave >= 2;
+    const target = (allDone || expired || pastIntro) ? 0 : 1;
+    // smooth fade
+    this.onboardAlpha += (target - this.onboardAlpha) * 0.08;
+    if (this.onboardAlpha < 0.01 && target === 0) this.onboardAlpha = 0;
+    const pulse = 0.85 + 0.15 * Math.sin(ob.t * 5);
+    const map = { MOVE: ob.move, JUMP: ob.jump, PUNCH: ob.punch, KICK: ob.kick };
+    for (const chip of this.onboardChips) {
+      const done = map[chip.action];
+      const a = this.onboardAlpha * (done ? 0.3 : 1) * (done ? 1 : pulse);
+      chip.key.setAlpha(a);
+      chip.label.setAlpha(a);
     }
   }
 }
