@@ -1,6 +1,7 @@
 import { CONFIG, COLORS, DIFFICULTY } from '../config.js';
 import { Stickman } from '../entities/Stickman.js';
 import { drawBackground } from '../utils/background.js';
+import { Meta } from '../systems/Meta.js';
 
 const DIFF_ORDER = ['easy', 'normal', 'hard'];
 
@@ -24,6 +25,10 @@ export class TitleScene extends Phaser.Scene {
     if (!DIFFICULTY[this.difficulty]) this.difficulty = 'normal';
     this.registry.set('difficulty', this.difficulty);
 
+    // daily challenge flag (reset each visit to the title)
+    this.registry.set('daily', false);
+    this.dailyOn = false;
+
     // title
     const title = this.add.text(cx, 170, 'STICKMAN ARENA', {
       fontFamily: 'Impact, Arial Black, sans-serif',
@@ -41,16 +46,43 @@ export class TitleScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     // difficulty selector — click to cycle Easy -> Normal -> Hard
-    this.diffLabel = this.add.text(cx, CONFIG.HEIGHT - 200, '', {
-      fontFamily: 'Arial Black', fontSize: '22px', color: '#ffffff',
+    this.diffLabel = this.add.text(cx - 150, CONFIG.HEIGHT - 200, '', {
+      fontFamily: 'Arial Black', fontSize: '20px', color: '#ffffff',
       stroke: '#0b1a2a', strokeThickness: 5,
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
     this._refreshDiff();
-    // hit-test rectangle for guarding the global tap-to-start handler
-    this.diffRect = new Phaser.Geom.Rectangle(0, 0, 240, 48).setTo(cx - 120, CONFIG.HEIGHT - 224);
+    this.diffRect = new Phaser.Geom.Rectangle(cx - 150 - 120, CONFIG.HEIGHT - 200 - 24, 240, 48);
     this.diffLabel.on('pointerdown', (pointer, localX, localY, event) => {
       event && event.stopPropagation();
       this._cycleDiff();
+    });
+
+    // skin selector — cycle unlocked palettes
+    this.skinLabel = this.add.text(cx + 150, CONFIG.HEIGHT - 200, '', {
+      fontFamily: 'Arial Black', fontSize: '20px', color: '#ffffff',
+      stroke: '#0b1a2a', strokeThickness: 5,
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    this._refreshSkin();
+    this.skinRect = new Phaser.Geom.Rectangle(cx + 150 - 120, CONFIG.HEIGHT - 200 - 24, 240, 48);
+    this.skinLabel.on('pointerdown', (pointer, localX, localY, event) => {
+      event && event.stopPropagation();
+      this._cycleSkin();
+    });
+
+    // daily challenge toggle — fixed modifier for today, separate best
+    const dm = Meta.dailyModifier();
+    const db = Meta.dailyBest();
+    this.dailyLabel = this.add.text(cx, CONFIG.HEIGHT - 258, '', {
+      fontFamily: 'Arial Black', fontSize: '16px', color: '#9bb4c8',
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    this._refreshDaily(dm, db);
+    this.dailyRect = new Phaser.Geom.Rectangle(cx - 320, CONFIG.HEIGHT - 258 - 18, 640, 36);
+    this.dailyLabel.on('pointerdown', (pointer, localX, localY, event) => {
+      event && event.stopPropagation();
+      this.dailyOn = !this.dailyOn;
+      this.registry.set('daily', this.dailyOn);
+      this._refreshDaily(dm, db);
+      this.audio && this.audio.ui();
     });
 
     this.subtitle = this.add.text(cx, CONFIG.HEIGHT - 150, 'PRESS  SPACE  /  TAP  TO  START', {
@@ -87,6 +119,8 @@ export class TitleScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-THREE', () => this._setDiff('hard'));
     this.input.on('pointerdown', (pointer) => {
       if (this.diffRect && this.diffRect.contains(pointer.x, pointer.y)) return;
+      if (this.skinRect && this.skinRect.contains(pointer.x, pointer.y)) return;
+      if (this.dailyRect && this.dailyRect.contains(pointer.x, pointer.y)) return;
       this.start();
     });
 
@@ -114,6 +148,36 @@ export class TitleScene extends Phaser.Scene {
     this.difficulty = k;
     localStorage.setItem('stickman_arena_diff', k);
     this._refreshDiff();
+  }
+
+  _refreshSkin() {
+    const unlocked = Meta.unlockedSkins();
+    let cur = Meta.getSkin();
+    if (unlocked.indexOf(cur) === -1) cur = 'default';
+    this._skinList = unlocked.length ? unlocked : ['default'];
+    const def = Meta.skinDef(cur);
+    this.skinLabel.setText('\u25C0  ' + def.label + '  \u25B6');
+    const p = def.palette;
+    const hex = '#' + p.accent.toString(16).padStart(6, '0');
+    this.skinLabel.setColor(hex);
+    Meta.setSkin(cur);
+    this.registry.set('skin', cur);
+  }
+  _cycleSkin() {
+    const cur = Meta.getSkin();
+    const list = this._skinList || ['default'];
+    const idx = list.indexOf(cur);
+    const next = list[(idx + 1) % list.length];
+    Meta.setSkin(next);
+    this._refreshSkin();
+    // reflect on the demo stickman
+    this.demo.palette = Meta.skinPalette(next);
+    this.audio && this.audio.ui();
+  }
+  _refreshDaily(dm, db) {
+    const label = (this.dailyOn ? '[ON]  ' : '[OFF] ') + 'DAILY: ' + dm.name + ' \u2014 ' + dm.desc + '  (best ' + db.best + ')';
+    this.dailyLabel.setText(label);
+    this.dailyLabel.setColor(this.dailyOn ? '#ffd23f' : '#7fb6d6');
   }
 
   start() {

@@ -4,6 +4,7 @@ import { Enemy } from '../entities/Enemy.js';
 import { Pickup } from '../entities/Pickup.js';
 import { drawBackground } from '../utils/background.js';
 import { aabb, clamp, sign, rand, randInt } from '../utils/math.js';
+import { Meta } from '../systems/Meta.js';
 
 export class GameScene extends Phaser.Scene {
   constructor() { super('Game'); }
@@ -31,6 +32,7 @@ export class GameScene extends Phaser.Scene {
     this.gameOver = false;
     this.hitsTaken = 0;
     this.healed = 0;
+    this.kills = 0;
     this.spawned = { grunt: 0, runner: 0, brute: 0, leaper: 0 };
     this.tierBonuses = 0;
     this.onboard = { move: false, jump: false, punch: false, kick: false, t: 0 };
@@ -39,10 +41,31 @@ export class GameScene extends Phaser.Scene {
     const diffKey = this.registry.get('difficulty') || 'normal';
     this.diff = DIFFICULTY[diffKey] || DIFFICULTY.normal;
 
+    // daily modifier (optional) composes on top of difficulty
+    this.daily = this.registry.get('daily') ? Meta.dailyModifier() : null;
+    this.mods = {
+      enemyHp: this.diff.enemyHp,
+      enemySpeed: this.diff.enemySpeed,
+      enemyDmg: this.diff.enemyDmg,
+      aggr: this.diff.aggr,
+      scoreMul: 1,
+      extraPerWave: 0,
+    };
+    if (this.daily) {
+      if (this.daily.enemySpeed) this.mods.enemySpeed *= this.daily.enemySpeed;
+      if (this.daily.enemyDmg) this.mods.enemyDmg *= this.daily.enemyDmg;
+      if (this.daily.enemyHp) this.mods.enemyHp *= this.daily.enemyHp;
+      if (this.daily.scoreMul) this.mods.scoreMul *= this.daily.scoreMul;
+      if (this.daily.extraPerWave) this.mods.extraPerWave += this.daily.extraPerWave;
+    }
+    const playerHp = this.daily && this.daily.playerHp ? this.daily.playerHp : this.diff.playerHp;
+
     this.player = new Player(this, CONFIG.WIDTH / 2, CONFIG.GROUND_Y);
     this.player.facing = 1;
-    this.player.maxHealth = this.diff.playerHp;
-    this.player.health = this.diff.playerHp;
+    this.player.maxHealth = playerHp;
+    this.player.health = playerHp;
+    // apply the player's selected skin palette (cosmetic)
+    this.player.setPalette(Meta.skinPalette());
 
     // shared control state (also written by UIScene touch controls)
     this.controls = {
@@ -138,7 +161,8 @@ export class GameScene extends Phaser.Scene {
   startWave(n) {
     this.wave = n;
     this.waveActive = true;
-    const count = Math.min(2 + Math.floor(n * 0.9), 8);
+    const extra = (this.mods && this.mods.extraPerWave) || 0;
+    const count = Math.min(2 + Math.floor(n * 0.9) + extra, 9);
     this.spawnQueue = count;
     this.spawnTimer = 0.3;
     this.ui.banner('WAVE ' + n, n === 1 ? '#35e1ff' : (n % 5 === 0 ? '#ff3b30' : '#ffd23f'));
@@ -161,12 +185,12 @@ export class GameScene extends Phaser.Scene {
     // surrounds the player rather than stacking on one side.
     e.flankDir = (this.enemies.length % 2 === 0) ? (fromLeft ? 1 : -1) : (fromLeft ? -1 : 1);
     // wave-based scaling — steeper so late waves actually threaten; difficulty
-    // preset multiplies on top so Easy/Hard shift the whole curve.
-    const d = this.diff;
-    e.speedMul = (1 + Math.min(n, 15) * 0.045) * d.enemySpeed;
-    e.hpMul = (1 + Math.min(n, 15) * 0.075) * d.enemyHp;
-    e.aggrMul = (0.8 + Math.min(n - 1, 8) * 0.07) * d.aggr; // wave1 gentle, wave9+ fierce
-    e.dmgMul = d.enemyDmg;
+    // preset + daily modifier multiply on top so the whole curve shifts.
+    const m = this.mods;
+    e.speedMul = (1 + Math.min(n, 15) * 0.045) * m.enemySpeed;
+    e.hpMul = (1 + Math.min(n, 15) * 0.075) * m.enemyHp;
+    e.aggrMul = (0.8 + Math.min(n - 1, 8) * 0.07) * m.aggr; // wave1 gentle, wave9+ fierce
+    e.dmgMul = m.enemyDmg;
     e.health = e.maxHealth = e.maxHealth * e.hpMul;
     this.enemies.push(e);
   }
@@ -211,7 +235,7 @@ export class GameScene extends Phaser.Scene {
     this.bestCombo = Math.max(this.bestCombo, this.combo);
     this.comboTimer = CONFIG.COMBO_WINDOW;
     const mult = 1 + Math.floor((this.combo - 1) / 4) * 0.5;
-    const gain = Math.round(10 * mult);
+    const gain = Math.round(10 * mult * this.mods.scoreMul);
     this.score += gain;
     this.burst(enemy.x, enemy.y - 70 * enemy.scale, enemy.v.palette.fist, 12);
     this._spark(enemy.x, enemy.y - 70 * enemy.scale, hb.kb > 400 ? '#ffd23f' : '#ffffff');
@@ -224,12 +248,14 @@ export class GameScene extends Phaser.Scene {
     }
     this._checkComboTier();
     if (killed) {
-      this.score += Math.round(enemy.v.score * mult);
+      this.kills++;
+      const gain2 = Math.round(enemy.v.score * mult * this.mods.scoreMul);
+      this.score += gain2;
       this.burst(enemy.x, enemy.y - 70 * enemy.scale, enemy.v.palette.accent, 26);
       this.cameras.main.shake(120, 0.014);
       this.audio && this.audio.bigHit();
       this.slowmo = 0.18;
-      this.ui.floatText('K.O. +' + Math.round(enemy.v.score * mult), enemy.x, enemy.y - 150 * enemy.scale, enemy.v.palette.fist, 26);
+      this.ui.floatText('K.O. +' + gain2, enemy.x, enemy.y - 150 * enemy.scale, enemy.v.palette.fist, 26);
       // chance to drop a health pickup (more likely if player low)
       const dropChance = this.player.health < 40 ? 0.4 : 0.2;
       if (Math.random() < dropChance && this.player.health < this.player.maxHealth) {
@@ -332,8 +358,8 @@ export class GameScene extends Phaser.Scene {
         if (alive === 0) {
           this.waveActive = false;
           this.waveBreak = 1.1;
-          this.score += 100 * this.wave;
-          this.ui.banner('WAVE CLEAR  +' + 100 * this.wave, '#6bff9e');
+          this.score += Math.round(100 * this.wave * this.mods.scoreMul);
+          this.ui.banner('WAVE CLEAR  +' + Math.round(100 * this.wave * this.mods.scoreMul), '#6bff9e');
         }
       }
     } else {
@@ -415,6 +441,9 @@ export class GameScene extends Phaser.Scene {
         comboTimer: this.comboTimer,
         tierBonuses: this.tierBonuses,
         difficulty: this.diff && this.diff.label,
+        kills: this.kills,
+        daily: this.daily ? this.daily.name : null,
+        scoreMul: this.mods && this.mods.scoreMul,
       };
     }
   }
@@ -422,9 +451,18 @@ export class GameScene extends Phaser.Scene {
   _endGame() {
     const hs = parseInt(localStorage.getItem('stickman_arena_hs') || '0', 10);
     if (this.score > hs) localStorage.setItem('stickman_arena_hs', String(this.score));
+    // meta-progression: persist stats, compute unlocks, track daily best
+    const rec = Meta.recordRun({
+      kills: this.kills, wave: this.wave, bestCombo: this.bestCombo, score: this.score,
+    });
+    let newDailyBest = false;
+    if (this.daily) newDailyBest = Meta.recordDaily(this.score);
     this.scene.stop('UI');
     this.scene.start('GameOver', {
       score: this.score, wave: this.wave, bestCombo: this.bestCombo,
+      kills: this.kills, stats: rec.stats, newlyUnlocked: rec.newlyUnlocked,
+      daily: this.daily ? Object.assign({ newBest: newDailyBest }, Meta.dailyBest()) : null,
+      mods: this.mods,
     });
   }
 }
