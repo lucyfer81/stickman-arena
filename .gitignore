@@ -6,3 +6,7 @@ node_modules/
 __pycache__/
 /tests/shots/
 .venv/
+
+# agent instruction files — local only, do not push
+AGENTS.md
+CLAUDE.md
