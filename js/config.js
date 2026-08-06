@@ -16,7 +16,7 @@ export const CONFIG = {
     COYOTE_TIME: 0.10,
     JUMP_BUFFER: 0.12,
     MAX_HEALTH: 100,
-    HURT_INVULN: 0.6,
+    HURT_INVULN: 0.5,
     PUNCH: {
       DAMAGE: 9,
       REACH: 78,
@@ -48,8 +48,9 @@ export const CONFIG = {
     ATTACK_REACH: 86,
     ATTACK_WINDUP: 0.34,
     ATTACK_ACTIVE: 0.12,
-    ATTACK_RECOVER: 0.5,
+    ATTACK_RECOVER: 0.34,
     KNOCKBACK: 380,
+    MAX_ALIVE: 6,
   },
 
   COMBO_WINDOW: 2.2,

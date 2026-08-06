@@ -29,6 +29,8 @@ export class GameScene extends Phaser.Scene {
     this.slowmo = 0;
     this.timeScale = 1;
     this.gameOver = false;
+    this.hitsTaken = 0;
+    this.healed = 0;
 
     this.player = new Player(this, CONFIG.WIDTH / 2, CONFIG.GROUND_Y);
     this.player.facing = 1;
@@ -127,7 +129,7 @@ export class GameScene extends Phaser.Scene {
   startWave(n) {
     this.wave = n;
     this.waveActive = true;
-    const count = Math.min(2 + Math.floor(n * 0.7), 7);
+    const count = Math.min(2 + Math.floor(n * 0.9), 8);
     this.spawnQueue = count;
     this.spawnTimer = 0.3;
     this.ui.banner('WAVE ' + n, n === 1 ? '#35e1ff' : (n % 5 === 0 ? '#ff3b30' : '#ffd23f'));
@@ -144,9 +146,13 @@ export class GameScene extends Phaser.Scene {
     const x = fromLeft ? CONFIG.WALL_LEFT + 10 : CONFIG.WALL_RIGHT - 10;
     const e = new Enemy(this, x, CONFIG.GROUND_Y, variant);
     e.facing = fromLeft ? 1 : -1;
-    // wave-based scaling
-    e.speedMul = 1 + Math.min(n, 12) * 0.035;
-    e.hpMul = 1 + Math.min(n, 12) * 0.06;
+    // flank assignment: alternating sides, seeded by spawn side, so the pack
+    // surrounds the player rather than stacking on one side.
+    e.flankDir = (this.enemies.length % 2 === 0) ? (fromLeft ? 1 : -1) : (fromLeft ? -1 : 1);
+    // wave-based scaling — steeper so late waves actually threaten
+    e.speedMul = 1 + Math.min(n, 15) * 0.045;
+    e.hpMul = 1 + Math.min(n, 15) * 0.075;
+    e.aggrMul = 0.8 + Math.min(n - 1, 8) * 0.07; // wave1 gentle, wave9+ fierce
     e.health = e.maxHealth = e.maxHealth * e.hpMul;
     this.enemies.push(e);
   }
@@ -220,6 +226,7 @@ export class GameScene extends Phaser.Scene {
   _onPlayerHurt(enemy, hb) {
     this.combo = 0;
     this.comboTimer = 0;
+    this.hitsTaken++;
     this.hitPause = Math.max(this.hitPause, 0.08);
     this.cameras.main.shake(160, 0.02);
     this.burst(this.player.x, this.player.y - 100, COLORS_PLAYER.accent, 18);
@@ -283,10 +290,10 @@ export class GameScene extends Phaser.Scene {
     if (this.waveActive) {
       if (this.spawnQueue > 0) {
         this.spawnTimer -= stepDt;
-        if (this.spawnTimer <= 0 && this.enemies.length < 5) {
+        if (this.spawnTimer <= 0 && this.enemies.length < CONFIG.ENEMY.MAX_ALIVE) {
           this.spawnOne();
           this.spawnQueue--;
-          this.spawnTimer = rand(0.5, 1.1);
+          this.spawnTimer = rand(0.35, 0.8);
         }
       } else {
         const alive = this.enemies.filter((e) => !e.dead).length;
@@ -312,6 +319,7 @@ export class GameScene extends Phaser.Scene {
       if (p._collected) {
         const heal = 25;
         this.player.health = Math.min(this.player.maxHealth, this.player.health + heal);
+        this.healed += heal;
         this.burst(this.player.x, this.player.y - 60, 0x35e1ff, 16);
         this.audio && this.audio.combo(8);
         this.ui.floatText('+' + heal + ' HP', this.player.x, this.player.y - 160, '#35e1ff', 22);
@@ -365,6 +373,7 @@ export class GameScene extends Phaser.Scene {
         bestCombo: this.bestCombo, health: this.player.health,
         enemiesAlive: alive, spawnQueue: this.spawnQueue,
         waveActive: this.waveActive,
+        hitsTaken: this.hitsTaken, healed: this.healed,
       };
     }
   }
