@@ -89,9 +89,31 @@ Core test suite: 5/5 passing (desktop ×3, mobile-landscape, mobile-portrait).
 5. **UX** — brief input lockout on Game Over.
 
 ### Remaining (post-launch backlog)
-- #6 difficulty select / adaptive ramp
-- #7 combo timer UI + reward tiers
-- #8 meta-progression (unlocks, daily challenge)
-- #10 audio volume control (mute-only today)
-- #5 depth: a ranged/jumping enemy to punish pure jump-spam
+- #6 difficulty select / adaptive ramp — **DONE** (Easy/Normal/Hard select)
+- #7 combo timer UI + reward tiers — **DONE** (timer bar + x5/x10/x15/x20/x30 tiers)
+- #8 meta-progression (unlocks, daily challenge) — **DONE** (stats + 4 skins + daily modifier)
+- #10 audio volume control (mute-only today) — **DONE** (3-level volume cycle)
+- #5 depth: a ranged/jumping enemy to punish pure jump-spam — **DONE** (leaper variant)
+
+## Round 2 — remaining iterable items (all complete)
+
+All five remaining audit items shipped on `agent-dev`:
+
+| # | Item | Outcome |
+|---|---|---|
+| 5 | Leaper enemy (anti-air dive) | jump-spam at wave 6 takes real damage (5 hits -> 55 HP); no longer a safe exploit |
+| 7 | Combo timer bar + reward tiers | visible 2.2s drain bar; x5/x10/x15/x20/x30 milestones (NICE!..GODLIKE!) grant bonus + banner |
+| 6 | Difficulty select | Easy/Normal/Hard on title (player HP 120/100/90, enemy scaling), persists |
+| 10 | Volume control | 3-level cycle (loud/soft/muted) replaces mute-only, persists |
+| 8 | Meta-progression | career stats, 4 unlockable skins, date-keyed daily challenge w/ separate best |
+
+Test suite: official 5/5 green (desktop×3, mobile-landscape, mobile-portrait),
+plus focused suites for combat-exploit, onboarding, combo, difficulty, volume,
+and meta-progression.
+
+The game now offers: a real difficulty curve with a depth ceiling (armor
+model + leaper), onboarding, readable combos, player-chosen challenge,
+persistent goals + cosmetics, and a daily hook — the full arcade retention
+loop.
+
 
