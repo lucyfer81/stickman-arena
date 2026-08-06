@@ -16,10 +16,12 @@ module.exports = defineConfig({
   projects: [
     {
       name: 'desktop',
+      testMatch: /core\.spec\.js/,
       use: { ...devices['Desktop Chrome'] },
     },
     {
       name: 'mobile-landscape',
+      testMatch: /mobile-landscape\.spec\.js/,
       use: {
         ...devices['Pixel 7'],
         viewport: { width: 915, height: 412 },
@@ -30,7 +32,9 @@ module.exports = defineConfig({
     },
     {
       name: 'mobile-portrait',
+      testMatch: /mobile-portrait\.spec\.js/,
       use: {
+        ...devices['Pixel 7'],
         viewport: { width: 412, height: 915 },
         deviceScaleFactor: 2,
         hasTouch: true,

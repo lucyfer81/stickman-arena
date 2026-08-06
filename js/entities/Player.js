@@ -189,7 +189,11 @@ export class Player extends Stickman {
     const wasAir = !this.onGround;
     if (this.y >= CONFIG.GROUND_Y) {
       this.y = CONFIG.GROUND_Y;
-      if (this.vy > 420 && wasAir) this.scene.audio && this.scene.audio.land();
+      if (this.vy > 420 && wasAir) {
+        this.scene.audio && this.scene.audio.land();
+        this.scene.dustBurst && this.scene.dustBurst(this.x, CONFIG.GROUND_Y, Math.min(14, 6 + Math.floor(this.vy / 120)));
+        if (this.vy > 760) this.scene.cameras.main.shake(60, 0.004);
+      }
       this.vy = 0;
       this.onGround = true;
     } else {

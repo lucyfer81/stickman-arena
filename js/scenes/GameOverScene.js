@@ -62,6 +62,9 @@ export class GameOverScene extends Phaser.Scene {
     this.input.on('pointerdown', () => this.restart());
 
     this.cameras.main.fadeIn(400);
+    if (typeof window !== 'undefined') {
+      window.__stickman = { state: 'gameover', score: r.score, wave: r.wave, bestCombo: r.bestCombo };
+    }
   }
 
   restart() {

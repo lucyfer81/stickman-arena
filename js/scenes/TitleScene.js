@@ -65,6 +65,7 @@ export class TitleScene extends Phaser.Scene {
     this.input.on('pointerdown', () => this.start());
 
     this.cameras.main.fadeIn(300);
+    if (typeof window !== 'undefined') window.__stickman = { state: 'title' };
   }
 
   start() {

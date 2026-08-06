@@ -6,7 +6,7 @@ import { pulse, clamp01, easeOut, lerp } from '../utils/math.js';
 const HIP_Y = 54;
 const NECK_Y = 108;
 const HEAD_Y = 132;
-const HEAD_R = 13;
+const HEAD_R = 14;
 
 function idlePose(t) {
   const bob = Math.sin(t * 2.2) * 1.6;
@@ -198,64 +198,79 @@ export class Stickman extends Phaser.GameObjects.Graphics {
     const pal = this.palette;
     this.clear();
 
-    const lw = 6;
+    const lw = 7;
     const limb = pal.limb;
     const joint = pal.joint;
+    const a = this.alpha;
 
-    this.lineStyle(lw, limb, this.alpha);
-    // spine
+    // soft aura behind torso
+    const torso = p(pose.neck);
+    this.fillStyle(pal.accent, 0.10 * a);
+    this.fillCircle(torso.x, torso.y + 6, 46);
+
     const hip = p(pose.hip), neck = p(pose.neck);
-    this.strokeLineShape(new Phaser.Geom.Line(hip.x, hip.y, neck.x, neck.y));
-
-    const seg = (a, b) => {
-      this.strokeLineShape(new Phaser.Geom.Line(a.x, a.y, b.x, b.y));
+    const seg2 = (ka, kb, w, col, al) => {
+      const A = p(pose[ka]), B = p(pose[kb]);
+      this.lineStyle(w, col, al);
+      this.strokeLineShape(new Phaser.Geom.Line(A.x, A.y, B.x, B.y));
     };
 
-    // legs
-    const hipP = p(pose.hip);
-    seg(hipP, p(pose.kneeL)); seg(p(pose.kneeL), p(pose.footL));
-    seg(hipP, p(pose.kneeR)); seg(p(pose.kneeR), p(pose.footR));
-    // arms
-    seg(neck, p(pose.elbowL)); seg(p(pose.elbowL), p(pose.handL));
-    seg(neck, p(pose.elbowR)); seg(p(pose.elbowR), p(pose.handR));
+    // dark outline pass (pops against bg)
+    const seg = (x, y) => seg2(x, y, lw + 4, 0x05070d, a);
+    seg('hip', 'neck');
+    seg('hip', 'kneeL'); seg('kneeL', 'footL');
+    seg('hip', 'kneeR'); seg('kneeR', 'footR');
+    seg('neck', 'elbowL'); seg('elbowL', 'handL');
+    seg('neck', 'elbowR'); seg('elbowR', 'handR');
 
-    // joints (rounded)
-    this.fillStyle(joint, this.alpha);
+    // bright color pass
+    const col = (x, y) => seg2(x, y, lw, limb, a);
+    col('hip', 'neck');
+    col('hip', 'kneeL'); col('kneeL', 'footL');
+    col('hip', 'kneeR'); col('kneeR', 'footR');
+    col('neck', 'elbowL'); col('elbowL', 'handL');
+    col('neck', 'elbowR'); col('elbowR', 'handR');
+
+    // joints
+    this.fillStyle(joint, a);
     for (const j of [pose.kneeL, pose.kneeR, pose.elbowL, pose.elbowR, pose.hip]) {
       const q = p(j);
-      this.fillCircle(q.x, q.y, lw * 0.42);
+      this.fillCircle(q.x, q.y, lw * 0.5);
     }
 
-    // head
+    // head with outline
     const head = p(pose.head);
-    this.lineStyle(lw, limb, this.alpha);
-    // neck-to-head connector drawn already via spine; draw head circle outline + face accent
-    this.strokeCircle(head.x, head.y, STICK.HEAD_R);
-    this.fillStyle(pal.head, this.alpha * 0.18);
-    this.fillCircle(head.x, head.y, STICK.HEAD_R - 2);
+    this.lineStyle(4, 0x05070d, a);
+    this.strokeCircle(head.x, head.y, HEAD_R + 1);
+    this.lineStyle(lw, limb, a);
+    this.strokeCircle(head.x, head.y, HEAD_R);
+    this.fillStyle(pal.head, a * 0.22);
+    this.fillCircle(head.x, head.y, HEAD_R - 2);
+    // face: eye dot toward facing direction
+    this.fillStyle(0x05070d, a);
+    this.fillCircle(head.x + this.facing * 5, head.y - 2, 2.4);
 
     // fists with glow
     const drawFist = (pt, isAccent) => {
       const q = p(pt);
-      const baseR = lw * 0.55;
+      const baseR = lw * 0.62;
       if (this.glow > 0.01 && isAccent) {
-        this.fillStyle(pal.accent, this.glow * 0.35 * this.alpha);
-        this.fillCircle(q.x, q.y, baseR + 10 * this.glow);
-        this.fillStyle(pal.fist, (0.6 + 0.4 * this.glow) * this.alpha);
-        this.fillCircle(q.x, q.y, baseR + 2 * this.glow);
+        this.fillStyle(pal.accent, this.glow * 0.4 * a);
+        this.fillCircle(q.x, q.y, baseR + 12 * this.glow);
+        this.fillStyle(pal.fist, (0.7 + 0.3 * this.glow) * a);
+        this.fillCircle(q.x, q.y, baseR + 3 * this.glow);
       } else {
-        this.fillStyle(joint, this.alpha);
+        this.fillStyle(joint, a);
         this.fillCircle(q.x, q.y, baseR);
       }
     };
-    // front hand is the "active" fist
     drawFist(pose.handR, true);
     drawFist(pose.handL, false);
 
     // feet
-    this.fillStyle(joint, this.alpha);
+    this.fillStyle(joint, a);
     const fL = p(pose.footL), fR = p(pose.footR);
-    this.fillCircle(fL.x, fL.y, lw * 0.5);
-    this.fillCircle(fR.x, fR.y, lw * 0.5);
+    this.fillCircle(fL.x, fL.y, lw * 0.55);
+    this.fillCircle(fR.x, fR.y, lw * 0.55);
   }
 }

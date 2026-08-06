@@ -24,6 +24,7 @@ export class GameScene extends Phaser.Scene {
     this.waveActive = false;
     this.waveBreak = 1.6;
     this.hitPause = 0;
+    this.slowmo = 0;
     this.timeScale = 1;
     this.gameOver = false;
 
@@ -38,6 +39,15 @@ export class GameScene extends Phaser.Scene {
     };
     this._setupKeyboard();
     this._setupParticles();
+    if (typeof window !== 'undefined') {
+      window.__controls = this.controls;
+      window.__stickman = { state: 'game', score: 0, wave: 0 };
+      window.__test = {
+        hurt: (n) => this.player.takeHit(n || 99, this.player.x - 100, 0),
+        setHealth: (n) => { this.player.health = n; },
+        killEnemies: () => { for (const e of this.enemies) if (!e.dead) e.takeHit(9999, this.player.x, 0, 0); },
+      };
+    }
 
     this.scene.launch('UI');
     this.ui = this.scene.get('UI');
@@ -53,6 +63,7 @@ export class GameScene extends Phaser.Scene {
 
   _setupKeyboard() {
     const k = this.input.keyboard;
+    const c = this.controls;
     this.keys = {
       left: k.addKey('A'), left2: k.addKey('LEFT'),
       right: k.addKey('D'), right2: k.addKey('RIGHT'),
@@ -61,7 +72,12 @@ export class GameScene extends Phaser.Scene {
       punch: k.addKey('J'),
       kick: k.addKey('K'),
     };
-    this.keys.jump.on('down', () => { this.audio && this.audio.resume(); });
+    const resume = () => this.audio && this.audio.resume();
+    this.keys.jump.on('down', () => { resume(); c.jumpPressed = true; });
+    this.keys.up.on('down', () => { resume(); c.jumpPressed = true; });
+    this.keys.up2.on('down', () => { resume(); c.jumpPressed = true; });
+    this.keys.punch.on('down', () => { resume(); c.punchPressed = true; });
+    this.keys.kick.on('down', () => { resume(); c.kickPressed = true; });
     k.on('keydown-ESC', () => this._togglePause());
   }
 
@@ -98,6 +114,11 @@ export class GameScene extends Phaser.Scene {
     this.hitEmitter.setPosition(x, y);
     this.hitEmitter.tint = color;
     this.hitEmitter.explode(count);
+  }
+
+  dustBurst(x, y, count = 8) {
+    this.dustEmitter.setPosition(x, y);
+    this.dustEmitter.explode(count);
   }
 
   // ---- waves ----
@@ -180,6 +201,8 @@ export class GameScene extends Phaser.Scene {
       this.burst(enemy.x, enemy.y - 70 * enemy.scale, enemy.v.palette.accent, 26);
       this.cameras.main.shake(120, 0.014);
       this.audio && this.audio.bigHit();
+      this.slowmo = 0.18;
+      this.ui.floatText('K.O. +' + Math.round(enemy.v.score * mult), enemy.x, enemy.y - 150 * enemy.scale, enemy.v.palette.fist, 26);
     }
   }
 
@@ -236,12 +259,19 @@ export class GameScene extends Phaser.Scene {
     if (c.kickPressed) { p_tryAttack(this, 'kick'); c.kickPressed = false; }
     if (c.jumpPressed) { c.jumpPressed = false; }
 
-    this.player.update(dt, c);
+    // slow-motion right after a kill
+    let stepDt = dt;
+    if (this.slowmo > 0) {
+      this.slowmo -= dtMs / 1000;
+      stepDt = dt * 0.35;
+    }
+
+    this.player.update(stepDt, c);
 
     // wave logic
     if (this.waveActive) {
       if (this.spawnQueue > 0) {
-        this.spawnTimer -= dt;
+        this.spawnTimer -= stepDt;
         if (this.spawnTimer <= 0 && this.enemies.length < 5) {
           this.spawnOne();
           this.spawnQueue--;
@@ -257,11 +287,11 @@ export class GameScene extends Phaser.Scene {
         }
       }
     } else {
-      this.waveBreak -= dt;
+      this.waveBreak -= stepDt;
       if (this.waveBreak <= 0) this.startWave(this.wave + 1);
     }
 
-    for (const e of this.enemies) e.update(dt, this.player);
+    for (const e of this.enemies) e.update(stepDt, this.player);
     // cleanup destroyed
     this.enemies = this.enemies.filter((e) => e.active !== false && e.scene);
 
@@ -304,6 +334,15 @@ export class GameScene extends Phaser.Scene {
       enemiesLeft: alive + this.spawnQueue,
       bestCombo: this.bestCombo,
     });
+    if (typeof window !== 'undefined') {
+      window.__stickman = {
+        state: this.gameOver ? 'dying' : 'game',
+        score: this.score, wave: this.wave, combo: this.combo,
+        bestCombo: this.bestCombo, health: this.player.health,
+        enemiesAlive: alive, spawnQueue: this.spawnQueue,
+        waveActive: this.waveActive,
+      };
+    }
   }
 
   _endGame() {
