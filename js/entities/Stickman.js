@@ -182,7 +182,11 @@ export class Stickman extends Phaser.GameObjects.Graphics {
     this.facing = 1;
     this.palette = palette;
     this.glow = 0; // fist glow 0..1
-    this.alpha = 1;
+    this.alpha = 1;       // Phaser GameObject alpha — left at 1 (see _alpha below).
+    this._alpha = 1;      // manual draw alpha (flicker / death fade). Applied once
+                          // inside render(); we don't also lower GameObject.alpha,
+                          // which would double-multiply (a*a) and make flicker/fade
+                          // fade to a^2 — far too faint.
     this.setDepth(10);
     scene.add.existing(this);
   }
@@ -201,7 +205,7 @@ export class Stickman extends Phaser.GameObjects.Graphics {
     const lw = 7;
     const limb = pal.limb;
     const joint = pal.joint;
-    const a = this.alpha;
+    const a = this._alpha;
 
     // soft aura behind torso
     const torso = p(pose.neck);

@@ -1,4 +1,4 @@
-import { CONFIG, DIFFICULTY } from '../config.js';
+import { CONFIG, DIFFICULTY, COLORS } from '../config.js';
 import { Player } from '../entities/Player.js';
 import { Enemy } from '../entities/Enemy.js';
 import { Pickup } from '../entities/Pickup.js';
@@ -82,6 +82,10 @@ export class GameScene extends Phaser.Scene {
         hurt: (n) => this.player.takeHit(n || 99, this.player.x - 100, 0),
         setHealth: (n) => { this.player.health = n; },
         killEnemies: () => { for (const e of this.enemies) if (!e.dead) e.takeHit(9999, this.player.x, 0, 0); },
+        // clean instant despawn (skips the death anim) — for tests that just need
+        // to advance waves without creating a corpse backlog that interacts with
+        // the spawn gate / death-tween behaviour.
+        despawnEnemies: () => { for (const e of this.enemies) if (!e.dead) { e.dead = true; e.destroy(); } },
       };
     }
 
@@ -182,8 +186,10 @@ export class GameScene extends Phaser.Scene {
     e.facing = fromLeft ? 1 : -1;
     if (this.spawned && this.spawned[variant] != null) this.spawned[variant]++;
     // flank assignment: alternating sides, seeded by spawn side, so the pack
-    // surrounds the player rather than stacking on one side.
-    e.flankDir = (this.enemies.length % 2 === 0) ? (fromLeft ? 1 : -1) : (fromLeft ? -1 : 1);
+    // surrounds the player rather than stacking on one side. Base the slot on
+    // LIVING enemies only — lingering death-anims would otherwise skew the count.
+    const aliveCount = this.enemies.filter((e) => !e.dead).length;
+    e.flankDir = (aliveCount % 2 === 0) ? (fromLeft ? 1 : -1) : (fromLeft ? -1 : 1);
     // wave-based scaling — steeper so late waves actually threaten; difficulty
     // preset + daily modifier multiply on top so the whole curve shifts.
     const m = this.mods;
@@ -206,7 +212,8 @@ export class GameScene extends Phaser.Scene {
         if (e.dead || e.lastSwing === p.swingId) continue;
         if (aabb(phb, e.bodyBox())) {
           e.lastSwing = p.swingId;
-          const wasAlive = !e.dead;
+          // decide kill from pre-hit health so the death anim/K.O. feedback lines
+          // up with takeHit's own <=0 check.
           const killed = e.health - phb.dmg <= 0;
           e.takeHit(phb.dmg, phb.from, phb.kb, phb.pause);
           this._onPlayerHit(e, phb, killed);
@@ -243,7 +250,9 @@ export class GameScene extends Phaser.Scene {
     this.audio && this.audio.hit();
     if (this.combo > 1) this.audio && this.audio.combo(this.combo);
     this.ui.floatText('+' + gain, enemy.x, enemy.y - 120 * enemy.scale, '#ffd23f');
-    if (this.combo >= 3 && this.combo % 1 === 0) {
+    // periodic multiplier reminder (every 3rd hit) — a per-hit xN popup would
+    // duplicate the +gain popup above and spam the screen. (`% 1` was always true.)
+    if (this.combo >= 3 && this.combo % 3 === 0) {
       this.ui.floatText('x' + this.combo, this.player.x, this.player.y - 220, '#35e1ff', 26);
     }
     this._checkComboTier();
@@ -270,18 +279,19 @@ export class GameScene extends Phaser.Scene {
     this.hitsTaken++;
     this.hitPause = Math.max(this.hitPause, 0.08);
     this.cameras.main.shake(160, 0.02);
-    this.burst(this.player.x, this.player.y - 100, COLORS_PLAYER.accent, 18);
+    this.burst(this.player.x, this.player.y - 100, COLORS.player.accent, 18);
     this._spark(this.player.x, this.player.y - 100, '#ff3b30');
     this.audio && this.audio.bigHit();
   }
 
   _spark(x, y, color) {
     const g = this.fxLayer;
-    g.lineStyle(3, 0xffffff, 1);
+    const cnum = (typeof color === 'string') ? parseInt(color.replace('#', ''), 16) : (color || 0xffffff);
+    g.lineStyle(3, cnum, 1);
     const n = 6;
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + rand(-0.2, 0.2);
-      const r1 = 8, r2 = rand(16, 28);
+      const r2 = rand(16, 28);
       g.lineBetween(x, y, x + Math.cos(a) * r2, y + Math.sin(a) * r2);
     }
     this.time.delayedCall(60, () => this.fxLayer.clear());
@@ -291,9 +301,14 @@ export class GameScene extends Phaser.Scene {
     if (!CONFIG.COMBO_TIERS || !CONFIG.COMBO_TIERS.length) return;
     if (CONFIG.COMBO_TIERS.indexOf(this.combo) === -1) return;
     const tierNames = { 5: 'NICE!', 10: 'GREAT!', 15: 'AWESOME!', 20: 'INSANE!', 30: 'GODLIKE!' };
-    const bonus = CONFIG.COMBO_TIER_BONUS;
+    // tier bonus honours the active score multiplier (daily modifiers like
+    // BLOODLUST x2 / HUNTER x1.3) so it's consistent with hit/kill/wave scoring.
+    const bonus = Math.round(CONFIG.COMBO_TIER_BONUS * (this.mods && this.mods.scoreMul || 1));
     this.score += bonus;
     this.tierBonuses++;
+    // persist the new best-combo immediately so a milestone unlock (e.g. the
+    // GOLD skin at x20) survives even if the run never reaches _endGame.
+    Meta.noteCombo(this.combo);
     const label = tierNames[this.combo] || ('COMBO x' + this.combo);
     this.ui.banner(label + '  +' + bonus, '#ffd23f');
     this.audio && this.audio.combo(this.combo + 4);
@@ -348,7 +363,10 @@ export class GameScene extends Phaser.Scene {
     if (this.waveActive) {
       if (this.spawnQueue > 0) {
         this.spawnTimer -= stepDt;
-        if (this.spawnTimer <= 0 && this.enemies.length < CONFIG.ENEMY.MAX_ALIVE) {
+        // gate on LIVING enemies only — dead-but-animating corpses briefly linger
+        // in the array (their death tween runs to completion before destroy()).
+        const aliveNow = this.enemies.filter((e) => !e.dead).length;
+        if (this.spawnTimer <= 0 && aliveNow < CONFIG.ENEMY.MAX_ALIVE) {
           this.spawnOne();
           this.spawnQueue--;
           this.spawnTimer = rand(0.3, 0.65);
@@ -368,8 +386,10 @@ export class GameScene extends Phaser.Scene {
     }
 
     for (const e of this.enemies) e.update(stepDt, this.player);
-    // cleanup destroyed
-    this.enemies = this.enemies.filter((e) => e.active !== false && e.scene);
+    // cleanup only fully-destroyed enemies (scene nulled by Phaser.destroy()).
+    // Dead-but-animating enemies stay so their death tween + destroy() can run;
+    // removing them early left frozen corpses on screen and leaked Graphics.
+    this.enemies = this.enemies.filter((e) => e.scene);
 
     // pickups
     for (const p of this.pickups) {
@@ -413,7 +433,7 @@ export class GameScene extends Phaser.Scene {
       g.fillEllipse(x, CONFIG.GROUND_Y + 4, w, 9 * scale);
     };
     drawShadow(this.player.x, this.player.y, 1);
-    for (const e of this.enemies) drawShadow(e.x, e.y, e.scale);
+    for (const e of this.enemies) if (!e.dead) drawShadow(e.x, e.y, e.scale);
   }
 
   _updateHUD() {
@@ -449,8 +469,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   _endGame() {
-    const hs = parseInt(localStorage.getItem('stickman_arena_hs') || '0', 10);
-    if (this.score > hs) localStorage.setItem('stickman_arena_hs', String(this.score));
+    let hsRaw = '0';
+    try { hsRaw = localStorage.getItem('stickman_arena_hs') || '0'; } catch (e) {}
+    const hs = parseInt(hsRaw, 10);
+    // decide "new best" against the PRE-save value so an exact tie of the
+    // existing high score is not mis-reported as a new record.
+    const newBest = this.score > hs && this.score > 0;
+    if (this.score > hs) { try { localStorage.setItem('stickman_arena_hs', String(this.score)); } catch (e) {} }
     // meta-progression: persist stats, compute unlocks, track daily best
     const rec = Meta.recordRun({
       kills: this.kills, wave: this.wave, bestCombo: this.bestCombo, score: this.score,
@@ -461,6 +486,7 @@ export class GameScene extends Phaser.Scene {
     this.scene.start('GameOver', {
       score: this.score, wave: this.wave, bestCombo: this.bestCombo,
       kills: this.kills, stats: rec.stats, newlyUnlocked: rec.newlyUnlocked,
+      newBest,
       daily: this.daily ? Object.assign({ newBest: newDailyBest }, Meta.dailyBest()) : null,
       mods: this.mods,
     });
@@ -484,5 +510,3 @@ function p_tryAttack(scene, type) {
   }
   p.tryAttack(type, faceDir);
 }
-
-const COLORS_PLAYER = { accent: 0x35e1ff };

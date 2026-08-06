@@ -34,13 +34,25 @@ export class UIScene extends Phaser.Scene {
 
     this._buildTouchControls();
     this._buildPauseOverlay();
+    this._buildPauseButton();
     this._buildMute();
     this._buildOnboarding();
 
     this.floats = [];
     this._touchVisible = false;
     this.refreshTouchVisibility();
-    this.scale.on('resize', () => this.refreshTouchVisibility());
+    // Named handler, removed on shutdown/destroy — the ScaleManager is global and
+    // outlives this scene, so an anonymous arrow would leak one callback (holding
+    // a dead UIScene reference) per restart.
+    this._onResize = () => this.refreshTouchVisibility();
+    this.scale.on('resize', this._onResize);
+    this.events.once('shutdown', this._cleanup, this);
+    this.events.once('destroy', this._cleanup, this);
+  }
+
+  _cleanup() {
+    if (this._onResize) this.scale.off('resize', this._onResize);
+    this._onResize = null;
   }
 
   refreshTouchVisibility() {
@@ -190,13 +202,48 @@ export class UIScene extends Phaser.Scene {
     const t = this.add.text(0, -20, 'PAUSED', {
       fontFamily: 'Impact, Arial Black', fontSize: '80px', color: '#ffffff',
     }).setOrigin(0.5);
-    const h = this.add.text(0, 50, 'press ESC to resume', {
+    const h = this.add.text(0, 50, 'tap \u25B6 or press ESC to resume', {
       fontFamily: 'Arial', fontSize: '22px', color: '#9bb4c8',
     }).setOrigin(0.5);
     this.pauseOverlay.add([bg, t, h]);
   }
 
-  setPaused(p) { this.pauseOverlay.setVisible(p); }
+  _buildPauseButton() {
+    // Always-visible pause toggle (top-left, just right of the HP bar).
+    // Critical for touch devices which have no ESC key; also helps desktop
+    // discoverability. Sits above the pause overlay so it can resume too.
+    const bx = 24 + 280 + 26, by = 35, r = 16;
+    const g = this.add.graphics().setDepth(210);
+    const label = this.add.text(bx, by, 'II', {
+      fontFamily: 'Arial Black', fontSize: '16px', color: '#eaf4ff',
+    }).setOrigin(0.5).setDepth(211);
+    const draw = (pressed) => {
+      g.clear();
+      g.fillStyle(0x12203a, pressed ? 0.95 : 0.6);
+      g.fillCircle(bx, by, r);
+      g.lineStyle(2, 0x9bb4c8, pressed ? 1 : 0.6);
+      g.strokeCircle(bx, by, r);
+    };
+    draw(false);
+    const zone = this.add.zone(bx, by, r * 2.6, r * 2.6).setInteractive().setDepth(212);
+    zone.on('pointerdown', () => { draw(true); });
+    zone.on('pointerup', () => {
+      draw(false);
+      const gs = this.gameScene;
+      if (gs && !gs.gameOver) gs._togglePause();
+    });
+    zone.on('pointerout', () => draw(false));
+    zone.on('pointerupoutside', () => draw(false));
+    this._pauseBtn = { g, label, draw };
+  }
+
+  setPaused(p) {
+    this.pauseOverlay.setVisible(p);
+    // swap glyph II / ▶ so the button reads as a resume control while paused
+    if (this._pauseBtn) {
+      this._pauseBtn.label.setText(p ? '\u25B6' : 'II');
+    }
+  }
 
   _buildOnboarding() {
     // Progressive control hints shown at game start (desktop only — on touch the
@@ -247,9 +294,12 @@ export class UIScene extends Phaser.Scene {
     });
   }
 
-  update() {
+  update(_time, deltaMs) {
     const hud = this.registry.get('hud');
     if (!hud) return;
+    // frame-rate-independent tween rates (were ±0.2/0.1 per frame → 2.4x faster
+    // on 144Hz). Normalize to per-second using the actual frame delta.
+    const dt = Math.min(deltaMs || 16, 50) / 1000;
     // health bar
     const g = this.hudG;
     g.clear();
@@ -264,7 +314,6 @@ export class UIScene extends Phaser.Scene {
     g.fillRoundedRect(bx, by, Math.max(0, bw * hp), bh, 5);
     g.lineStyle(2, 0xffffff, 0.25);
     g.strokeRoundedRect(bx, by, bw, bh, 5);
-    this.add.text && 0; // no-op
     // label
     if (!this._hpLabel) {
       this._hpLabel = this.add.text(bx + 8, by + 2, 'HP', {
@@ -280,7 +329,7 @@ export class UIScene extends Phaser.Scene {
     const tierHit = hud.combo >= 5;
     if (hud.combo >= 2) {
       this.comboText.setText('x' + hud.combo + ' COMBO');
-      this.comboText.setAlpha(Math.min(1, this.comboText.alpha + 0.2));
+      this.comboText.setAlpha(Math.min(1, this.comboText.alpha + 12 * dt));
       this.comboText.setScale(1 + Math.min(hud.combo, 20) * 0.02);
       this.comboText.setColor(tierHit ? '#ffd23f' : '#35e1ff');
       // combo timer bar — shows the remaining combo window so the player knows
@@ -294,13 +343,13 @@ export class UIScene extends Phaser.Scene {
       g.fillStyle(ccol, calpha);
       g.fillRoundedRect(cxx, cyy, Math.max(0, cw * frac), ch, 4);
     } else {
-      this.comboText.setAlpha(Math.max(0, this.comboText.alpha - 0.1));
+      this.comboText.setAlpha(Math.max(0, this.comboText.alpha - 6 * dt));
     }
 
-    this._updateOnboarding();
+    this._updateOnboarding(dt);
   }
 
-  _updateOnboarding() {
+  _updateOnboarding(dt) {
     const gs = this.gameScene;
     const ob = gs && gs.onboard;
     if (!ob || !this.onboardChips) return;
@@ -308,8 +357,9 @@ export class UIScene extends Phaser.Scene {
     const expired = ob.t > 16;
     const pastIntro = gs.wave >= 2;
     const target = (allDone || expired || pastIntro) ? 0 : 1;
-    // smooth fade
-    this.onboardAlpha += (target - this.onboardAlpha) * 0.08;
+    // exponential approach, framerate-independent (was *0.08 per frame).
+    const k = 1 - Math.exp(-5 * dt);
+    this.onboardAlpha += (target - this.onboardAlpha) * k;
     if (this.onboardAlpha < 0.01 && target === 0) this.onboardAlpha = 0;
     const pulse = 0.85 + 0.15 * Math.sin(ob.t * 5);
     const map = { MOVE: ob.move, JUMP: ob.jump, PUNCH: ob.punch, KICK: ob.kick };

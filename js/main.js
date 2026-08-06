@@ -33,6 +33,7 @@ const config = {
 };
 
 const game = new Phaser.Game(config);
+if (typeof window !== 'undefined') window.__game = game;
 game.registry.set('audio', audio);
 
 // resume audio on first interaction

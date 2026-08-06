@@ -85,7 +85,10 @@ test.describe('Combat exploit diagnostic (fresh page each)', () => {
   test('leaper punishes jump-spam at high waves', async ({ page }) => {
     test.setTimeout(120000);
     await startGame(page);
-    // fast-forward to a wave where leapers spawn (wave >= 4)
+    // fast-forward to a wave where leapers spawn (wave >= 4). killEnemies is a
+    // test shortcut that creates corpses faster than the death anim expires, so
+    // afterwards we let the encounter settle: drain the backed-up spawn queue
+    // and let lingering death-anims finish so wave-6 starts from a normal state.
     const ffDeadline = Date.now() + 60000;
     while (Date.now() < ffDeadline) {
       await page.evaluate(() => window.__test && window.__test.killEnemies && window.__test.killEnemies());
@@ -93,18 +96,25 @@ test.describe('Combat exploit diagnostic (fresh page each)', () => {
       const t = await telemetry(page);
       if (t && t.wave >= 6) break;
     }
+    await page.waitForTimeout(2500); // settle: clear corpse backlog + spawn queue
     const before = await telemetry(page);
+    const leapersSoFar = (before.spawned && before.spawned.leaper) || 0;
     // now jump-spam (the previously-safe strategy) and measure pressure
     const deadline = Date.now() + 30000;
     const startHits = before.hitsTaken;
+    let finalT = before;
     while (Date.now() < deadline) {
       await page.keyboard.down('Space'); await page.waitForTimeout(40); await page.keyboard.up('Space');
       await page.waitForTimeout(90);
       const t = await telemetry(page);
-      if (t.state === 'gameover') break;
+      if (t) finalT = t;
+      if (t && (t.state === 'gameover')) break;
     }
-    const t = await telemetry(page);
-    console.log(`LEAPER-JUMPSPAM => wave=${t.wave} hp=${t.health} hitsThisPhase=${t.hitsTaken - startHits} spawned=${JSON.stringify(t.spawned)}`);
-    expect((t.spawned && t.spawned.leaper) || 0).toBeGreaterThan(0);
+    // read from the last in-game sample (finalT may be gameover, which carries no
+    // `spawned`), so use `before` for the spawn census taken while still in-game.
+    const t = finalT;
+    const leapers = (before.spawned && before.spawned.leaper) || leapersSoFar;
+    console.log(`LEAPER-JUMPSPAM => wave=${before.wave} hp=${t.health} hitsThisPhase=${(t.hitsTaken || startHits) - startHits} leapers=${leapers}`);
+    expect(leapers).toBeGreaterThan(0);
   });
 });

@@ -15,16 +15,20 @@ export class GameOverScene extends Phaser.Scene {
     drawBackground(this);
     this.audio = this.registry.get('audio');
     const cx = CONFIG.WIDTH / 2;
-    const hs = parseInt(localStorage.getItem('stickman_arena_hs') || '0', 10);
+    let hsRaw = '0';
+    try { hsRaw = localStorage.getItem('stickman_arena_hs') || '0'; } catch (e) {}
+    const hs = parseInt(hsRaw, 10);
     const r = this.result || { score: 0, wave: 1, bestCombo: 0, kills: 0 };
     const stats = r.stats || Meta.loadStats();
+    // newBest is computed in GameScene._endGame against the PRE-save hs; relying
+    // on `score >= hs` here would mis-report an exact tie as a new record.
+    const newBest = !!r.newBest;
 
     this.add.text(cx, 120, r.daily ? 'DAILY RUN OVER' : 'GAME OVER', {
       fontFamily: 'Impact, Arial Black', fontSize: r.daily ? 72 : 96, color: '#ff3b30',
       stroke: '#0b1a2a', strokeThickness: 10,
     }).setOrigin(0.5).setShadow(0, 6, '#000', 12, true, true);
 
-    const newBest = r.score >= hs && r.score > 0;
     const lines = [
       ['SCORE', r.score, '#eaf4ff'],
       ['WAVE REACHED', r.wave, '#35e1ff'],

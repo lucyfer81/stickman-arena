@@ -20,8 +20,10 @@ export class TitleScene extends Phaser.Scene {
     this.t = 0;
     this.demoAction = 0;
 
-    // difficulty (persists)
-    this.difficulty = localStorage.getItem('stickman_arena_diff') || 'normal';
+    // difficulty (persists) — guarded: Safari private mode can throw on access
+    let storedDiff = 'normal';
+    try { storedDiff = localStorage.getItem('stickman_arena_diff') || 'normal'; } catch (e) {}
+    this.difficulty = storedDiff;
     if (!DIFFICULTY[this.difficulty]) this.difficulty = 'normal';
     this.registry.set('difficulty', this.difficulty);
 
@@ -104,7 +106,9 @@ export class TitleScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     // high score
-    const hs = parseInt(localStorage.getItem('stickman_arena_hs') || '0', 10);
+    let hsRaw = '0';
+    try { hsRaw = localStorage.getItem('stickman_arena_hs') || '0'; } catch (e) {}
+    const hs = parseInt(hsRaw, 10);
     if (hs > 0) {
       this.add.text(cx, 300, 'BEST  ' + hs, {
         fontFamily: 'Arial Black', fontSize: '26px', color: '#35e1ff',
@@ -140,13 +144,13 @@ export class TitleScene extends Phaser.Scene {
   _cycleDiff() {
     const idx = DIFF_ORDER.indexOf(this.difficulty);
     this.difficulty = DIFF_ORDER[(idx + 1) % DIFF_ORDER.length];
-    localStorage.setItem('stickman_arena_diff', this.difficulty);
+    try { localStorage.setItem('stickman_arena_diff', this.difficulty); } catch (e) {}
     this._refreshDiff();
   }
   _setDiff(k) {
     if (!DIFFICULTY[k]) return;
     this.difficulty = k;
-    localStorage.setItem('stickman_arena_diff', k);
+    try { localStorage.setItem('stickman_arena_diff', k); } catch (e) {}
     this._refreshDiff();
   }
 

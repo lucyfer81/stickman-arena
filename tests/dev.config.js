@@ -34,6 +34,7 @@ module.exports = defineConfig({
     project('meta',        /meta\.spec\.js/,         60000),
     project('onboard',     /onboard\.spec\.js/,      60000),
     project('playthrough', /playthrough\.spec\.js/, 180000),
+    project('qa',          /qa-regression\.spec\.js/, 120000),
     project('volume',      /volume\.spec\.js/,       30000),
   ],
   webServer: {

@@ -7,6 +7,7 @@ export class AudioManager {
     this.ctx = null;
     this.master = null;
     this.enabled = true;
+    this._timers = new Set();
     let stored = 0.6;
     try { stored = parseFloat(localStorage.getItem('stickman_arena_vol')); if (isNaN(stored)) stored = 0.6; } catch (e) {}
     this.volume = stored;
@@ -14,16 +15,34 @@ export class AudioManager {
   }
 
   _ensure() {
-    if (this.ctx) return;
+    if (this.ctx) return true;
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) { this.enabled = false; return false; }
       this.ctx = new AC();
       this.master = this.ctx.createGain();
       this.master.gain.value = this.volume;
       this.master.connect(this.ctx.destination);
+      return true;
     } catch (e) {
       this.enabled = false;
+      return false;
     }
+  }
+
+  // tracked setTimeout so multi-note sequences can be cancelled on teardown.
+  _later(fn, ms) {
+    const id = setTimeout(() => { this._timers.delete(id); try { fn(); } catch (e) {} }, ms);
+    this._timers.add(id);
+    return id;
+  }
+
+  destroy() {
+    for (const id of this._timers) clearTimeout(id);
+    this._timers.clear();
+    try { if (this.ctx) this.ctx.close(); } catch (e) {}
+    this.ctx = null;
+    this.master = null;
   }
 
   resume() {
@@ -77,34 +96,40 @@ export class AudioManager {
     return { g, t };
   }
 
+  _alive() { return this.ctx && this.ctx.state !== 'closed'; }
+
   tone(freq, dur, type = 'sine', gain = 0.4, slideTo = null) {
     if (this._silent()) return;
     this._ensure();
-    if (!this.ctx) return;
-    const ctx = this.ctx;
-    const o = ctx.createOscillator();
-    o.type = type;
-    o.frequency.setValueAtTime(freq, ctx.currentTime);
-    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, ctx.currentTime + dur);
-    const { g } = this._env(o, gain, 0.005, dur);
-    o.start();
-    o.stop(ctx.currentTime + dur + 0.05);
-    return g;
+    if (!this._alive()) return;
+    try {
+      const ctx = this.ctx;
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.setValueAtTime(freq, ctx.currentTime);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, ctx.currentTime + dur);
+      const { g } = this._env(o, gain, 0.005, dur);
+      o.start();
+      o.stop(ctx.currentTime + dur + 0.05);
+      return g;
+    } catch (e) {}
   }
 
   noise(dur, gain = 0.4, filterFreq = 1200, filterType = 'lowpass') {
     if (this._silent()) return;
     this._ensure();
-    if (!this.ctx) return;
-    const ctx = this.ctx;
-    const src = this._noise(dur);
-    const filt = ctx.createBiquadFilter();
-    filt.type = filterType;
-    filt.frequency.value = filterFreq;
-    src.connect(filt);
-    this._env(filt, gain, 0.004, dur);
-    src.start();
-    src.stop(ctx.currentTime + dur + 0.05);
+    if (!this._alive()) return;
+    try {
+      const ctx = this.ctx;
+      const src = this._noise(dur);
+      const filt = ctx.createBiquadFilter();
+      filt.type = filterType;
+      filt.frequency.value = filterFreq;
+      src.connect(filt);
+      this._env(filt, gain, 0.004, dur);
+      src.start();
+      src.stop(ctx.currentTime + dur + 0.05);
+    } catch (e) {}
   }
 
   punch() { this.tone(180, 0.12, 'square', 0.25, 70); this.noise(0.08, 0.18, 900); }
@@ -116,19 +141,19 @@ export class AudioManager {
   enemyDie() { this.tone(260, 0.22, 'sawtooth', 0.22, 60); this.noise(0.18, 0.18, 1200); }
   playerHurt() { this.tone(220, 0.18, 'square', 0.25, 110); }
   ui() { this.tone(520, 0.08, 'square', 0.16, 700); }
-  start() { this.tone(440, 0.1, 'square', 0.18, 660); setTimeout(() => this.tone(660, 0.14, 'square', 0.18, 880), 90); }
+  start() { this.tone(440, 0.1, 'square', 0.18, 660); this._later(() => this.tone(660, 0.14, 'square', 0.18, 880), 90); }
   combo(n) {
     const base = 440 + Math.min(n, 12) * 60;
     this.tone(base, 0.09, 'square', 0.18, base * 1.4);
   }
   wave(n) {
     this.tone(330, 0.12, 'triangle', 0.2, 440);
-    setTimeout(() => this.tone(440, 0.12, 'triangle', 0.2, 550), 110);
-    setTimeout(() => this.tone(550, 0.16, 'triangle', 0.2, 660), 220);
+    this._later(() => this.tone(440, 0.12, 'triangle', 0.2, 550), 110);
+    this._later(() => this.tone(550, 0.16, 'triangle', 0.2, 660), 220);
   }
   gameover() {
     this.tone(440, 0.2, 'sawtooth', 0.22, 330);
-    setTimeout(() => this.tone(330, 0.2, 'sawtooth', 0.22, 220), 180);
-    setTimeout(() => this.tone(220, 0.4, 'sawtooth', 0.22, 110), 360);
+    this._later(() => this.tone(330, 0.2, 'sawtooth', 0.22, 220), 180);
+    this._later(() => this.tone(220, 0.4, 'sawtooth', 0.22, 110), 360);
   }
 }

@@ -60,7 +60,9 @@ export class Player extends Stickman {
     if (this.dead || this.invuln > 0) return false;
     this.health = Math.max(0, this.health - dmg);
     this.attack = null;
-    this.vx = sign(this.x - fromX) * knockback * 0.6;
+    // knockback away from the attacker; fall back to forward shove if they're
+    // exactly overlapping (sign(0)===0 would otherwise cancel all horizontal kb).
+    this.vx = (sign(this.x - fromX) || this.facing || 1) * knockback * 0.6;
     this.vy = -260;
     this.onGround = false;
     if (this.health <= 0) {
@@ -101,7 +103,7 @@ export class Player extends Stickman {
     if (this.dead) {
       this.deadT += dt / 0.7;
       this._physics(dt, false);
-      this.alpha = clamp01(1 - (this.deadT - 0.7) * 2) * (this.invuln > 0 ? 0.5 : 1);
+      this._alpha = clamp01(1 - (this.deadT - 0.7) * 2) * (this.invuln > 0 ? 0.5 : 1);
       this._render();
       return;
     }
@@ -203,6 +205,7 @@ export class Player extends Stickman {
 
   _render() {
     let anim;
+    this.glow = 0; // default off; attack branch below lights the fist only mid-swing
     if (this.dead) {
       anim = { state: 'dead', time: this.animTime, deadT: this.deadT };
     } else if (this.state === 'punch' || this.state === 'kick') {
@@ -219,9 +222,9 @@ export class Player extends Stickman {
     }
     // flicker when invuln
     if (this.invuln > 0 && !this.dead) {
-      this.alpha = (Math.floor(this.animTime * 30) % 2 === 0) ? 0.4 : 1;
+      this._alpha = (Math.floor(this.animTime * 30) % 2 === 0) ? 0.4 : 1;
     } else if (!this.dead) {
-      this.alpha = 1;
+      this._alpha = 1;
     }
     this.render(anim);
   }
