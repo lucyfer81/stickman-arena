@@ -166,13 +166,22 @@ export class UIScene extends Phaser.Scene {
     this.muteText = this.add.text(x, y, '\u266A', {
       fontFamily: 'Arial', fontSize: '22px', color: '#7fb6d6',
     }).setOrigin(0, 0.5).setInteractive().setDepth(120);
+    const sync = () => {
+      const a = this.registry.get('audio');
+      if (!a) return;
+      const v = a.volume;
+      // three glyphs: loud, soft, muted
+      this.muteText.setText(v > 0.45 ? '\u266A\u266A' : v > 0 ? '\u266A' : '\u266A\u0338');
+      this.muteText.setColor(v <= 0 ? '#ff6f5c' : '#7fb6d6');
+    };
     this.muteText.on('pointerdown', () => {
       const a = this.registry.get('audio');
       if (!a) return;
-      a.setMuted(!a.muted);
-      this.muteText.setColor(a.muted ? '#ff6f5c' : '#7fb6d6');
-      this.muteText.setText(a.muted ? '\u266A\u0338' : '\u266A');
+      a.cycleVolume();
+      sync();
     });
+    this._syncVol = sync;
+    sync();
   }
 
   _buildPauseOverlay() {

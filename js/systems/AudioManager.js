@@ -1,10 +1,16 @@
 // Procedural audio via WebAudio. No external files.
+// Volume is a 3-level cycle (high/low/mute) persisted to localStorage.
+const LEVELS = [0.6, 0.3, 0];
+
 export class AudioManager {
   constructor() {
     this.ctx = null;
     this.master = null;
     this.enabled = true;
-    this.muted = false;
+    let stored = 0.6;
+    try { stored = parseFloat(localStorage.getItem('stickman_arena_vol')); if (isNaN(stored)) stored = 0.6; } catch (e) {}
+    this.volume = stored;
+    this.muted = this.volume <= 0;
   }
 
   _ensure() {
@@ -13,7 +19,7 @@ export class AudioManager {
       const AC = window.AudioContext || window.webkitAudioContext;
       this.ctx = new AC();
       this.master = this.ctx.createGain();
-      this.master.gain.value = 0.5;
+      this.master.gain.value = this.volume;
       this.master.connect(this.ctx.destination);
     } catch (e) {
       this.enabled = false;
@@ -25,10 +31,28 @@ export class AudioManager {
     if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
   }
 
-  setMuted(m) {
-    this.muted = m;
-    if (this.master) this.master.gain.value = m ? 0 : 0.5;
+  // 3-level volume cycle: 0.6 -> 0.3 -> 0 (mute) -> 0.6
+  cycleVolume() {
+    const idx = LEVELS.indexOf(this.volume);
+    const next = LEVELS[(idx + 1) % LEVELS.length] ?? 0.6;
+    this.setVolume(next);
+    return next;
   }
+
+  setVolume(v) {
+    this.volume = v;
+    this.muted = v <= 0;
+    if (this.master) this.master.gain.value = v;
+    try { localStorage.setItem('stickman_arena_vol', String(v)); } catch (e) {}
+  }
+
+  // pause mute (restores prior volume on unmute)
+  setMuted(m) {
+    this.suppressed = m;
+    if (this.master) this.master.gain.value = m ? 0 : this.volume;
+  }
+
+  _silent() { return !this.enabled || this.volume <= 0 || this.suppressed; }
 
   _noise(dur) {
     const ctx = this.ctx;
@@ -54,7 +78,7 @@ export class AudioManager {
   }
 
   tone(freq, dur, type = 'sine', gain = 0.4, slideTo = null) {
-    if (!this.enabled || this.muted) return;
+    if (this._silent()) return;
     this._ensure();
     if (!this.ctx) return;
     const ctx = this.ctx;
@@ -69,7 +93,7 @@ export class AudioManager {
   }
 
   noise(dur, gain = 0.4, filterFreq = 1200, filterType = 'lowpass') {
-    if (!this.enabled || this.muted) return;
+    if (this._silent()) return;
     this._ensure();
     if (!this.ctx) return;
     const ctx = this.ctx;
