@@ -72,8 +72,9 @@ export class Enemy extends Stickman {
 
     const phase = this.attack && this.attack.phase;
     if (heavy) {
-      // heavy hits break anything except a kill — full knockback + flinch
-      this.attack = null;
+      // heavy hits break anything except a kill — full knockback + flinch.
+      // Reset the windup glow so the flinched enemy doesn't keep a glowing fist.
+      this.attack = null; this.glow = 0;
       this.vx = dir * kb; this.vy = -200; this.onGround = false; this.facing = -dir;
       this.state = 'hurt'; this.hurtTime = 0;
       return true;
@@ -87,7 +88,7 @@ export class Enemy extends Stickman {
     if (phase === 'recover') {
       // PUNISH WINDOW: right after a swing, the enemy is fully interruptible.
       // This is when light attacks create space / start combos.
-      this.attack = null;
+      this.attack = null; this.glow = 0;
       this.vx = dir * kb; this.vy = -200; this.onGround = false; this.facing = -dir;
       this.state = 'hurt'; this.hurtTime = 0;
       return true;
@@ -131,7 +132,7 @@ export class Enemy extends Stickman {
     if (this.dead) {
       this.deadT += dt / 0.7;
       this._physics(dt);
-      this.alpha = clamp01(1 - (this.deadT - 0.6) * 2.5);
+      this._alpha = clamp01(1 - (this.deadT - 0.6) * 2.5);
       this._render();
       if (this.deadT >= 1) this._destroy();
       return;
@@ -174,10 +175,17 @@ export class Enemy extends Stickman {
     } else {
       this.vx *= clamp01(1 - 10 * dt);
       // first strike commits immediately so the player can't stall it with mash;
-      // later swings are gated by attackCd.
-      if (this.firstStrike || this.attackCd <= 0) {
-        if (this.onGround) this._startAttack();
+      // later swings are gated by attackCd. Only consume the first strike when an
+      // attack actually starts — airborne enemies keep it for when they land.
+      // (Same-flank overlap is intentionally left as-is: it gives the player an
+      // emergent cleave window, and the 0.5s hurt-invlun + one-hit-per-frame rule
+      // means stacked simultaneous swings still only land once. Spreading them out
+      // removed that window and over-pressured jump-spam in wave-6 testing.)
+      if (this.onGround && (this.firstStrike || this.attackCd <= 0)) {
+        this._startAttack();
         this.firstStrike = false;
+      } else if (!this.onGround) {
+        // hold the first strike until grounded
       } else {
         this.attackCd -= dt;
       }
@@ -186,6 +194,9 @@ export class Enemy extends Stickman {
     this._physics(dt);
     this._render();
   }
+
+  // (No boids separation: see note in update(). Same-flank clustering is left
+  // intact to preserve the player's emergent cleave + the tuned difficulty.)
 
   _startAttack() {
     const aggr = this.aggrMul;
@@ -268,13 +279,15 @@ export class Enemy extends Stickman {
       anim = { state: 'idle', time: this.animTime };
     }
     this.render(anim);
-    // hit flash overlay
+    // hit flash overlay — a soft white disc + thin ring over the torso so the
+    // player reads that the strike landed (the lineStyle was previously set but
+    // never stroked, so the ring was missing entirely).
     if (this.flashTime > 0) {
       const fa = clamp01(this.flashTime / 0.12);
-      this.lineStyle(8, 0xffffff, fa);
-      // redraw roughly over body via a translucent circle
       this.fillStyle(0xffffff, fa * 0.5);
       this.fillCircle(0, -60 * this.scale, 40 * this.scale);
+      this.lineStyle(3, 0xffffff, fa);
+      this.strokeCircle(0, -60 * this.scale, 40 * this.scale);
     }
   }
 
