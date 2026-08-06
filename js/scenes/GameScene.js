@@ -1,6 +1,7 @@
 import { CONFIG } from '../config.js';
 import { Player } from '../entities/Player.js';
 import { Enemy } from '../entities/Enemy.js';
+import { Pickup } from '../entities/Pickup.js';
 import { drawBackground } from '../utils/background.js';
 import { aabb, clamp, sign, rand, randInt } from '../utils/math.js';
 
@@ -15,6 +16,7 @@ export class GameScene extends Phaser.Scene {
     this.shadows = this.add.graphics().setDepth(5);
     this.fxLayer = this.add.graphics().setDepth(20); // hit sparks drawn directly
     this.enemies = [];
+    this.pickups = [];
     this.score = 0;
     this.combo = 0;
     this.comboTimer = 0;
@@ -142,6 +144,10 @@ export class GameScene extends Phaser.Scene {
     const x = fromLeft ? CONFIG.WALL_LEFT + 10 : CONFIG.WALL_RIGHT - 10;
     const e = new Enemy(this, x, CONFIG.GROUND_Y, variant);
     e.facing = fromLeft ? 1 : -1;
+    // wave-based scaling
+    e.speedMul = 1 + Math.min(n, 12) * 0.035;
+    e.hpMul = 1 + Math.min(n, 12) * 0.06;
+    e.health = e.maxHealth = e.maxHealth * e.hpMul;
     this.enemies.push(e);
   }
 
@@ -203,6 +209,11 @@ export class GameScene extends Phaser.Scene {
       this.audio && this.audio.bigHit();
       this.slowmo = 0.18;
       this.ui.floatText('K.O. +' + Math.round(enemy.v.score * mult), enemy.x, enemy.y - 150 * enemy.scale, enemy.v.palette.fist, 26);
+      // chance to drop a health pickup (more likely if player low)
+      const dropChance = this.player.health < 40 ? 0.4 : 0.2;
+      if (Math.random() < dropChance && this.player.health < this.player.maxHealth) {
+        this.pickups.push(new Pickup(this, enemy.x, enemy.y - 60));
+      }
     }
   }
 
@@ -294,6 +305,19 @@ export class GameScene extends Phaser.Scene {
     for (const e of this.enemies) e.update(stepDt, this.player);
     // cleanup destroyed
     this.enemies = this.enemies.filter((e) => e.active !== false && e.scene);
+
+    // pickups
+    for (const p of this.pickups) {
+      p.update(stepDt, this.player);
+      if (p._collected) {
+        const heal = 25;
+        this.player.health = Math.min(this.player.maxHealth, this.player.health + heal);
+        this.burst(this.player.x, this.player.y - 60, 0x35e1ff, 16);
+        this.audio && this.audio.combo(8);
+        this.ui.floatText('+' + heal + ' HP', this.player.x, this.player.y - 160, '#35e1ff', 22);
+      }
+    }
+    this.pickups = this.pickups.filter((p) => p.scene);
 
     this._resolveCombat();
 

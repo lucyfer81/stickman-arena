@@ -42,6 +42,8 @@ export class Enemy extends Stickman {
     this.attackCd = rand(0.4, 1.2);
     this.id = ++Enemy._idc;
     this.active = true;
+    this.speedMul = 1;
+    this.hpMul = 1;
   }
 
   bodyBox() {
@@ -125,7 +127,7 @@ export class Enemy extends Stickman {
     const stopDist = this.v.attackReach * 0.62;
     if (dist > stopDist) {
       const dir = sign(dx);
-      this.vx += (dir * this.v.speed - this.vx) * clamp01(8 * dt);
+      this.vx += (dir * this.v.speed * this.speedMul - this.vx) * clamp01(8 * dt);
       this.state = this.onGround ? 'run' : 'jump';
     } else {
       this.vx *= clamp01(1 - 10 * dt);
