@@ -24,7 +24,7 @@ export class GameScene extends Phaser.Scene {
     this.wave = 0;
     this.spawnQueue = 0;
     this.waveActive = false;
-    this.waveBreak = 1.6;
+    this.waveBreak = 1.0;
     this.hitPause = 0;
     this.slowmo = 0;
     this.timeScale = 1;
@@ -298,13 +298,13 @@ export class GameScene extends Phaser.Scene {
         if (this.spawnTimer <= 0 && this.enemies.length < CONFIG.ENEMY.MAX_ALIVE) {
           this.spawnOne();
           this.spawnQueue--;
-          this.spawnTimer = rand(0.35, 0.8);
+          this.spawnTimer = rand(0.3, 0.65);
         }
       } else {
         const alive = this.enemies.filter((e) => !e.dead).length;
         if (alive === 0) {
           this.waveActive = false;
-          this.waveBreak = 1.8;
+          this.waveBreak = 1.1;
           this.score += 100 * this.wave;
           this.ui.banner('WAVE CLEAR  +' + 100 * this.wave, '#6bff9e');
         }
