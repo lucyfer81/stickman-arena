@@ -31,6 +31,7 @@ export class GameScene extends Phaser.Scene {
     this.gameOver = false;
     this.hitsTaken = 0;
     this.healed = 0;
+    this.spawned = { grunt: 0, runner: 0, brute: 0, leaper: 0 };
     this.onboard = { move: false, jump: false, punch: false, kick: false, t: 0 };
 
     this.player = new Player(this, CONFIG.WIDTH / 2, CONFIG.GROUND_Y);
@@ -141,12 +142,14 @@ export class GameScene extends Phaser.Scene {
     const n = this.wave;
     let variant = 'grunt';
     const r = Math.random();
-    if (n >= 3 && r < 0.22) variant = 'brute';
-    else if (n >= 2 && r < 0.55) variant = 'runner';
+    if (n >= 4 && r < 0.18) variant = 'leaper';
+    else if (n >= 3 && r < 0.40) variant = 'brute';
+    else if (n >= 2 && r < 0.62) variant = 'runner';
     const fromLeft = Math.random() < 0.5;
     const x = fromLeft ? CONFIG.WALL_LEFT + 10 : CONFIG.WALL_RIGHT - 10;
     const e = new Enemy(this, x, CONFIG.GROUND_Y, variant);
     e.facing = fromLeft ? 1 : -1;
+    if (this.spawned && this.spawned[variant] != null) this.spawned[variant]++;
     // flank assignment: alternating sides, seeded by spawn side, so the pack
     // surrounds the player rather than stacking on one side.
     e.flankDir = (this.enemies.length % 2 === 0) ? (fromLeft ? 1 : -1) : (fromLeft ? -1 : 1);
@@ -364,11 +367,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   _updateHUD() {
-    const alive = this.enemies.filter((e) => !e.dead).length;
+    const alive = this.enemies.filter((e) => !e.dead);
+    const counts = { grunt: 0, runner: 0, brute: 0, leaper: 0 };
+    for (const e of alive) if (counts[e.variant] != null) counts[e.variant]++;
     this.registry.set('hud', {
       health: this.player.health, maxHealth: this.player.maxHealth,
       score: this.score, wave: this.wave, combo: this.combo,
-      enemiesLeft: alive + this.spawnQueue,
+      enemiesLeft: alive.length + this.spawnQueue,
       bestCombo: this.bestCombo,
     });
     if (typeof window !== 'undefined') {
@@ -376,10 +381,12 @@ export class GameScene extends Phaser.Scene {
         state: this.gameOver ? 'dying' : 'game',
         score: this.score, wave: this.wave, combo: this.combo,
         bestCombo: this.bestCombo, health: this.player.health,
-        enemiesAlive: alive, spawnQueue: this.spawnQueue,
+        enemiesAlive: alive.length, spawnQueue: this.spawnQueue,
         waveActive: this.waveActive,
         hitsTaken: this.hitsTaken, healed: this.healed,
         onboard: Object.assign({}, this.onboard),
+        variants: counts,
+        spawned: Object.assign({}, this.spawned),
       };
     }
   }
