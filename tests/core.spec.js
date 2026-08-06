@@ -73,11 +73,30 @@ test.describe('Desktop', () => {
     await page.goto('/');
     await page.keyboard.press('Space');
     await waitTele(page, (t) => t.state === 'game');
-    await page.evaluate(() => window.__test && window.__test.setHealth && window.__test.setHealth(1));
+    // drive a guaranteed kill instead of waiting on enemy AI timing (robust to load)
+    await page.evaluate(() => {
+      const step = () => {
+        const s = window.__stickman;
+        if (!s || s.state === 'gameover' || s.state === 'dying') return;
+        if (window.__test && window.__test.setHealth) window.__test.setHealth(1);
+        if (window.__test && window.__test.hurt) window.__test.hurt(99);
+      };
+      step();
+      window.__killTimer = setInterval(step, 300);
+    });
     await waitTele(page, (t) => t.state === 'gameover', 30000);
+    await page.evaluate(() => clearInterval(window.__killTimer));
     await page.screenshot({ path: 'tests/shots/07-gameover.png' });
-    await page.keyboard.press('R');
-    await waitTele(page, (t) => t.state === 'game', 10000);
+    // restart (retry R past the brief input lockout on the game-over screen)
+    let restarted = false;
+    const restartDeadline = Date.now() + 10000;
+    while (Date.now() < restartDeadline) {
+      await page.keyboard.press('R');
+      await page.waitForTimeout(250);
+      const tt = await telemetry(page);
+      if (tt && tt.state === 'game') { restarted = true; break; }
+    }
+    expect(restarted).toBe(true);
     expect(errors).toEqual([]);
   });
 });

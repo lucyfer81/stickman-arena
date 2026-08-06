@@ -35,6 +35,7 @@ export class UIScene extends Phaser.Scene {
     this._buildTouchControls();
     this._buildPauseOverlay();
     this._buildMute();
+    this._buildOnboarding();
 
     this.floats = [];
     this._touchVisible = false;
@@ -61,11 +62,12 @@ export class UIScene extends Phaser.Scene {
     this.touchGroup.add([this.joyBase, this.joyKnob]);
     this._drawJoy();
 
-    // right-side action buttons
-    const by = CONFIG.HEIGHT - 92;
-    this.btnPunch = this._makeBtn(CONFIG.WIDTH - 214, by, 56, 'PUNCH', 0xffd23f);
-    this.btnKick = this._makeBtn(CONFIG.WIDTH - 120, by - 38, 64, 'KICK', 0xff6f5c);
-    this.btnJump = this._makeBtn(CONFIG.WIDTH - 214, by - 64, 50, 'JUMP', 0x35e1ff);
+    // right-side action buttons — sized for thumbs; interactive zone is larger
+    // than the visual so near-misses still register (forgiving touch).
+    const by = CONFIG.HEIGHT - 84;
+    this.btnJump = this._makeBtn(CONFIG.WIDTH - 224, by - 70, 58, 'JUMP', 0x35e1ff);
+    this.btnPunch = this._makeBtn(CONFIG.WIDTH - 236, by, 66, 'PUNCH', 0xffd23f);
+    this.btnKick = this._makeBtn(CONFIG.WIDTH - 110, by - 30, 74, 'KICK', 0xff6f5c);
 
     this.input.addPointer(2);
 
@@ -141,9 +143,10 @@ export class UIScene extends Phaser.Scene {
     c.setPosition(x, y);
     draw(false);
     const t = this.add.text(x, y, label, {
-      fontFamily: 'Arial Black', fontSize: '13px', color: '#ffffff',
+      fontFamily: 'Arial Black', fontSize: '14px', color: '#ffffff',
     }).setOrigin(0.5);
-    const zone = this.add.zone(x, y, r * 2, r * 2).setInteractive();
+    // interactive zone is generously larger than the visual circle
+    const zone = this.add.zone(x, y, r * 2.5, r * 2.5).setInteractive();
     const c2 = this.gameScene.controls;
     const setFlag = (down) => {
       if (label === 'JUMP') { if (down) { c2.jumpPressed = true; c2.jumpHeldTouch = true; } else c2.jumpHeldTouch = false; }
@@ -185,6 +188,34 @@ export class UIScene extends Phaser.Scene {
   }
 
   setPaused(p) { this.pauseOverlay.setVisible(p); }
+
+  _buildOnboarding() {
+    // Progressive control hints shown at game start (desktop only — on touch the
+    // on-screen buttons are already self-labeled). Each chip dims as the player
+    // performs that action; the whole row fades out once all are done, after a
+    // timeout, or when the player reaches wave 2.
+    this.onboardChips = null;
+    if (this._touchVisible) return;
+    const hints = [['MOVE', 'A  D'], ['JUMP', 'W'], ['PUNCH', 'J'], ['KICK', 'K']];
+    const y = CONFIG.HEIGHT - 150;
+    this.onboardGroup = this.add.container(0, 0).setDepth(115);
+    this.onboardChips = [];
+    const gap = 190;
+    const totalW = gap * (hints.length - 1);
+    hints.forEach(([label, key], i) => {
+      const cx = CONFIG.WIDTH / 2 - totalW / 2 + i * gap;
+      const k = this.add.text(cx, y, key, {
+        fontFamily: 'Arial Black', fontSize: '22px', color: '#ffd23f',
+        stroke: '#0b1a2a', strokeThickness: 5,
+      }).setOrigin(0.5);
+      const l = this.add.text(cx, y + 24, label, {
+        fontFamily: 'Arial', fontSize: '14px', color: '#9bb4c8',
+      }).setOrigin(0.5);
+      this.onboardChips.push({ key: k, label: l, action: ['MOVE', 'JUMP', 'PUNCH', 'KICK'][i] });
+      this.onboardGroup.add([k, l]);
+    });
+    this.onboardAlpha = 0;
+  }
 
   banner(text, color = '#ffffff') {
     const b = this.bannerText;
@@ -243,6 +274,29 @@ export class UIScene extends Phaser.Scene {
       this.comboText.setScale(1 + Math.min(hud.combo, 20) * 0.02);
     } else {
       this.comboText.setAlpha(Math.max(0, this.comboText.alpha - 0.1));
+    }
+
+    this._updateOnboarding();
+  }
+
+  _updateOnboarding() {
+    const gs = this.gameScene;
+    const ob = gs && gs.onboard;
+    if (!ob || !this.onboardChips) return;
+    const allDone = ob.move && ob.jump && ob.punch && ob.kick;
+    const expired = ob.t > 16;
+    const pastIntro = gs.wave >= 2;
+    const target = (allDone || expired || pastIntro) ? 0 : 1;
+    // smooth fade
+    this.onboardAlpha += (target - this.onboardAlpha) * 0.08;
+    if (this.onboardAlpha < 0.01 && target === 0) this.onboardAlpha = 0;
+    const pulse = 0.85 + 0.15 * Math.sin(ob.t * 5);
+    const map = { MOVE: ob.move, JUMP: ob.jump, PUNCH: ob.punch, KICK: ob.kick };
+    for (const chip of this.onboardChips) {
+      const done = map[chip.action];
+      const a = this.onboardAlpha * (done ? 0.3 : 1) * (done ? 1 : pulse);
+      chip.key.setAlpha(a);
+      chip.label.setAlpha(a);
     }
   }
 }

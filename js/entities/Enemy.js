@@ -40,10 +40,13 @@ export class Enemy extends Stickman {
     this.deadT = 0;
     this.flashTime = 0;
     this.attackCd = rand(0.4, 1.2);
+    this.firstStrike = true; // first swing within range commits immediately
     this.id = ++Enemy._idc;
     this.active = true;
     this.speedMul = 1;
     this.hpMul = 1;
+    this.aggrMul = 1;     // wave-dependent aggression (lower recover/cooldown)
+    this.flankDir = 1;    // desired side relative to player (+1 right / -1 left)
   }
 
   bodyBox() {
@@ -55,18 +58,36 @@ export class Enemy extends Stickman {
     if (this.dead) return false;
     this.health -= dmg;
     this.flashTime = 0.12;
-    this.attack = null;
     const dir = sign(this.x - fromX) || 1;
-    this.vx = dir * kb;
-    this.vy = -200;
-    this.onGround = false;
-    this.facing = -dir;
-    if (this.health <= 0) {
-      this._die(dir);
-    } else {
-      this.state = 'hurt';
-      this.hurtTime = 0;
+    const heavy = kb > 400; // kick (heavy) is the universal interrupt — skill reward
+    // a kill always applies, regardless of armor
+    if (this.health <= 0) { this._die(dir); return true; }
+
+    const phase = this.attack && this.attack.phase;
+    if (heavy) {
+      // heavy hits break anything except a kill — full knockback + flinch
+      this.attack = null;
+      this.vx = dir * kb; this.vy = -200; this.onGround = false; this.facing = -dir;
+      this.state = 'hurt'; this.hurtTime = 0;
+      return true;
     }
+    if (phase === 'windup' || phase === 'active') {
+      // HYPER-ARMOR: a committed, telegraphed swing plants the feet — accumulated
+      // light hits cannot shove it out of its own strike. Kick or dodge instead.
+      this.vx = 0;
+      return true;
+    }
+    if (phase === 'recover') {
+      // PUNISH WINDOW: right after a swing, the enemy is fully interruptible.
+      // This is when light attacks create space / start combos.
+      this.attack = null;
+      this.vx = dir * kb; this.vy = -200; this.onGround = false; this.facing = -dir;
+      this.state = 'hurt'; this.hurtTime = 0;
+      return true;
+    }
+    // approaching / idle: light chip damage but minimal stall — the enemy keeps
+    // closing to commit range. Mashing punch cannot stunlock the approach.
+    this.vx = dir * kb * 0.05;
     return true;
   }
 
@@ -87,8 +108,8 @@ export class Enemy extends Stickman {
     const reach = this.v.attackReach;
     const cx = this.x + this.facing * (reach * 0.5 + 6);
     const w = reach;
-    const h = 80;
-    return { x: cx - w / 2, y: this.y - NECK * this.scale - h * 0.4, w, h, dmg: this.v.damage, kb: CONFIG.ENEMY.KNOCKBACK, from: this.x };
+    const h = 104; // tall enough that a low hop won't fully sidestep the swing
+    return { x: cx - w / 2, y: this.y - NECK * this.scale - h * 0.42, w, h, dmg: this.v.damage, kb: CONFIG.ENEMY.KNOCKBACK, from: this.x };
   }
 
   update(dt, player) {
@@ -119,21 +140,33 @@ export class Enemy extends Stickman {
       return;
     }
 
-    // AI
+    // AI — flank the player: each enemy claims a slot on alternating sides so
+    // they surround instead of stacking on one side.
     const dx = player.x - this.x;
     const dist = Math.abs(dx);
     this.facing = sign(dx) || this.facing;
 
-    const stopDist = this.v.attackReach * 0.62;
-    if (dist > stopDist) {
-      const dir = sign(dx);
+    const reach = this.v.attackReach;
+    // desired stand position on the enemy's assigned flank side
+    const desiredX = player.x + this.flankDir * reach * 0.55;
+    const standoff = Math.abs(this.x - desiredX);
+    const commitRange = reach * 0.82; // wide enough to commit before being disrupted
+
+    if (dist > commitRange || standoff > 30) {
+      // reposition toward the flank slot (keeps enemies on both sides)
+      const tx = standoff > 30 && dist <= commitRange * 1.5 ? desiredX : player.x;
+      const dir = sign(tx - this.x) || sign(dx) || 1;
       this.vx += (dir * this.v.speed * this.speedMul - this.vx) * clamp01(8 * dt);
       this.state = this.onGround ? 'run' : 'jump';
     } else {
       this.vx *= clamp01(1 - 10 * dt);
-      this.attackCd -= dt;
-      if (this.attackCd <= 0 && this.onGround) {
-        this._startAttack();
+      // first strike commits immediately so the player can't stall it with mash;
+      // later swings are gated by attackCd.
+      if (this.firstStrike || this.attackCd <= 0) {
+        if (this.onGround) this._startAttack();
+        this.firstStrike = false;
+      } else {
+        this.attackCd -= dt;
       }
       this.state = this.onGround ? 'idle' : 'jump';
     }
@@ -143,12 +176,14 @@ export class Enemy extends Stickman {
 
   _startAttack() {
     const v = this.v;
+    const aggr = this.aggrMul;
+    const windupFloor = CONFIG.ENEMY.ATTACK_WINDUP * 0.62; // keep it readable
     this.attack = {
       phase: 'windup',
       t: 0,
-      windup: CONFIG.ENEMY.ATTACK_WINDUP * (this.variant === 'brute' ? 1.15 : 1),
+      windup: Math.max(windupFloor, CONFIG.ENEMY.ATTACK_WINDUP * (this.variant === 'brute' ? 1.15 : 1) / aggr),
       active: CONFIG.ENEMY.ATTACK_ACTIVE,
-      recover: CONFIG.ENEMY.ATTACK_RECOVER,
+      recover: CONFIG.ENEMY.ATTACK_RECOVER * (this.variant === 'brute' ? 1.25 : 1) / aggr,
     };
     this.state = 'punch';
   }
@@ -156,11 +191,21 @@ export class Enemy extends Stickman {
   _progressAttack(dt) {
     const a = this.attack;
     a.t += dt;
-    if (a.phase === 'windup' && a.t >= a.windup) { a.phase = 'active'; a.t = 0; this.glow = 1; }
+    if (a.phase === 'windup') {
+      // visible "charge": fist glow ramps up so the player reads the committed swing
+      this.glow = clamp01(a.t / a.windup) * 0.9;
+      if (a.t >= a.windup) {
+        a.phase = 'active'; a.t = 0; this.glow = 1;
+        // LUNGE: commit forward so the swing actually reaches a backing/dodging
+        // target instead of whiffing in place. Scales with wave for late pressure.
+        const lunge = (this.variant === 'brute' ? 180 : 240) + this.aggrMul * 60;
+        this.vx = this.facing * lunge;
+      }
+    }
     else if (a.phase === 'active' && a.t >= a.active) { a.phase = 'recover'; a.t = 0; this.glow = 0.3; }
     else if (a.phase === 'recover' && a.t >= a.recover) {
       this.attack = null;
-      this.attackCd = rand(0.5, 1.3);
+      this.attackCd = rand(0.35, 0.85) / this.aggrMul;
       this.glow = 0;
       this.state = this.onGround ? 'idle' : 'jump';
     }

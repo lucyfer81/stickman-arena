@@ -47,6 +47,9 @@ export class GameOverScene extends Phaser.Scene {
     }
 
     this.t = 0;
+    this.inputLocked = true;
+    // brief lockout so the killing-blow tap doesn't instantly skip the screen
+    this.time.delayedCall(650, () => { this.inputLocked = false; });
     this.restartHint = this.add.text(cx, CONFIG.HEIGHT - 90, 'PRESS  R  /  TAP  TO  PLAY AGAIN', {
       fontFamily: 'Arial Black', fontSize: '26px', color: '#eaf4ff',
     }).setOrigin(0.5);
@@ -68,7 +71,7 @@ export class GameOverScene extends Phaser.Scene {
   }
 
   restart() {
-    if (this.restarting) return;
+    if (this.restarting || this.inputLocked) return;
     this.restarting = true;
     this.audio && this.audio.ui();
     this.cameras.main.fadeOut(250);
