@@ -332,4 +332,64 @@ bomber 爆炸、陨石落地、shielder 格挡 clang、玩家硬落地（>720px/
 仍是代理指标（无真人手感）；未来可加：破碎期间的专属动作（头槌/绝望一击）、重塑后的短暂
 "完美态"、或把 Second Wind 计数接入 meta 解锁（"曾重塑 N 次"徽章）。
 
+## 上线后模拟（Steam 评价驱动迭代）
+
+假设游戏已发售，写了 20 正面 + 20 负面 Steam 评价（基于真实特性，存于
+`docs/post-launch-reviews.md`），归类反复出现的抱怨，定位根因，真实修复。
+
+### Round A — 最常见抱怨：**没有音乐（全程死寂）**
+20 条差评里 6 条（30%）点名，且所有玩家都会中招——把游戏最强的"手感"（顿帧/慢镜）放在
+死气沉沉的背景里播放。
+
+**根因（源码核实）**：`AudioManager.js` 只有一次性程序化音效（punch/kick/hit…），全仓库
+搜 `bgm|music|ambient` 零命中，无任何场景启动过持续音频床——标题、每一波、每个 Boss、每个
+Second Wind 瞬间都是纯静音。
+
+**修复**：给 `AudioManager` 加**程序化生成音乐引擎**（沿用"100% 程序化、无外部文件"哲学，
+和音效同源）：
+- 经典 lookahead 调度器（25ms tick、0.2s 前瞻、精确 AudioContext 时间排程），16 步/小节。
+- 四档 intensity，场景事件即时切档：menu（92bpm 琶音+pad）→ combat（126bpm 贝斯+鼓）→
+  boss（150bpm 和声小调紧张+密集鼓）→ broken（140bpm 减音阶绝望）。
+- 独立 `musicGain` 挂在 master 下：音量/暂停静音自动生效；比 SFX 低一档不抢戏。
+- 接入点：Title 启动 menu→start 切 combat；GameScene.create 确保 combat；startWave 按
+  boss/普通切档；`_onEnterBroken`→broken；`_reform`→还原；GameOverScene.create stopMusic。
+- 遥测：`window.__stickman.music` + `window.__audio.getMusicState()`（on/intensity/bpm）。
+
+**验证**：新增 `tests/music.spec.js` 4/4（菜单/战斗、boss 切档往返、Second Wind 切档+reform
+还原、gameover 停止音乐，全程零 error），注册 `music` project。回归：官方 CI 5/5、laststand
+4/4、boss 3/3、volume 1/1 全绿（dev 套件中途一次 8 失败为我强杀长命令留下的孤儿进程争用
+8080 端口，清掉后单独跑全过，非代码回归）。
+
+### Round B — 修复音乐后，新最常见抱怨：**重复/内容薄（Boss 单一）**
+修好音乐后写第二批评价，"没音乐"消失，抱怨分布前移：**重复/太薄 + 只有一两种 Boss** 合并
+成新 #1（4/12，且正面评价也在"要更多 Boss"）。本质是同一结构性问题——玩家到 wave 10+ 重复
+遇到同样的 Boss。
+
+**根因**：`_spawnBoss` 永远 `new Enemy(...,'boss')`，单一原型单一攻击（下砸）；无第二 Boss
+数据、无特殊攻击分支，`isBoss` 仅认 `'boss'`。
+
+**修复**：加第二 Boss「The Oracle」(caster)——
+- `VARIANTS.bossCaster`：毒绿、1.45×、200hp。专属特殊技是**预警 0.6s 后抛射弹幕**（3 发/
+  狂暴 5 发），复用 ranger 投掷物池（`spawnEnemyProjectile` 加可选 dmg 覆盖）；对抗是走位/
+  起跳躲避 + recover 窗口惩罚，区别于 slammer 的"必跳冲击波"。
+- **交替**：真实 boss 波按奇偶——wave 5/15/25=slammer、wave 10/20/30=caster；横幅+顶部血条
+  显示 Boss 名（THE SLAMMER / THE ORACLE）。
+- **变体感知狂暴**：caster 召唤 leaper（防空，惩罚跳躲弹幕）替代 slammer 的 grunt。
+- 共享基础设施不变：两 Boss 共用血条/狂暴/超甲/BOSS DOWN 回报（`enemy.isBoss` 对两者均为真）。
+
+**接入要点**：Enemy 构造 `isBoss = 'boss'||'bossCaster'`、`bossKind`、`cast` 状态；armor 分支
+含 cast；render 分支含 cast；AI 特殊技按 bossKind 分流（`_startCast/_progressCast/_castRelease`）；
+`_spawnBoss` 真实 boss 波按奇偶选、越波调用默认 slammer（向后兼容）；`_bossEnrage` 按
+`ENRAGE_SUMMONS_KIND[bossKind]` 选召唤物；HUD/遥测加 bossKind/name + counts/spawned 加
+bossCaster；新增 `__test.spawnBossKind/bossFireSpecial` 钩子。
+
+**验证**：新增 `tests/bossvariety.spec.js` 4/4（wave5=slammer/wave10=caster、caster 弹幕生成
+投掷物、caster 狂暴召唤 leaper、caster 击杀触发 BOSS DOWN 回报+血包），注册 `bossvariety`
+project。回归修复：重构初版让越波 `spawnBoss()` 钩子误选 caster（wave1→bossIndex0 偶），破坏
+slammer 冲击波测试；改为"真实 boss 波按奇偶、越波默认 slammer"后，官方 CI 5/5 + boss 3/3 全绿。
+
+**趣味评估**：两 Boss 形成不同节奏的剪刀石头布——slammer=读条跳冲击波、caster=读条躲弹幕+
+近身惩罚。仍是代理指标；下轮候选=第三 Boss（冲锋型）或把 Boss 模组化（随机附加词缀）。
+
+
 

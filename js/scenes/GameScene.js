@@ -14,6 +14,8 @@ export class GameScene extends Phaser.Scene {
     drawBackground(this);
     this.audio = this.registry.get('audio');
     this.audio && this.audio.resume();
+    // ensure the generative soundtrack is up at combat intensity on enter
+    this.audio && this.audio.startMusic && this.audio.startMusic('combat');
 
     this.shadows = this.add.graphics().setDepth(5);
     this.fxLayer = this.add.graphics().setDepth(20); // hit sparks drawn direct
@@ -51,7 +53,7 @@ export class GameScene extends Phaser.Scene {
     this.hitsTaken = 0;
     this.healed = 0;
     this.kills = 0;
-    this.spawned = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0, shielder: 0, bomber: 0, ranger: 0 };
+    this.spawned = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0, shielder: 0, bomber: 0, ranger: 0, boss: 0, bossCaster: 0 };
     this.tierBonuses = 0;
     this.firstBloodDone = false;     // FIRST BLOOD fires once on the run's first non-boss kill
     this.waveFirstSpawn = true;      // wave-2 first spawn is a vanguard mini-elite
@@ -115,6 +117,20 @@ export class GameScene extends Phaser.Scene {
         // exercised without playing through 4 normal waves.
         gotoBossWave: (n) => { for (const e of this.enemies) e.destroy(); this.enemies = []; this.boss = null; this.shockwaves = []; this.hazards = []; this.projectiles = []; this.meteorWarnings = []; this.debris = []; this.startWave(n || CONFIG.BOSS.WAVE_EVERY); },
         spawnBoss: () => { this._spawnBoss(); },
+        // spawn a specific boss archetype directly (bypasses wave parity) and
+        // force the live boss to fire its special next tick — for deterministic
+        // caster/slammer testing.
+        spawnBossKind: (kind) => {
+          for (const e of this.enemies) e.destroy();
+          this.enemies = []; this.boss = null; this.shockwaves = []; this.hazards = []; this.projectiles = []; this.meteorWarnings = []; this.debris = [];
+          const variant = kind === 'caster' ? 'bossCaster' : 'boss';
+          const e = new Enemy(this, CONFIG.WALL_LEFT + 40, CONFIG.GROUND_Y, variant);
+          e.facing = 1; e.flankDir = 1;
+          this._applyScaling(e, Math.max(this.wave, 10));
+          this.boss = e; this.enemies.push(e);
+          return e.bossKind;
+        },
+        bossFireSpecial: () => { if (this.boss && !this.boss.dead) { this.boss.slamCd = 0; this.boss.castCd = 0; return true; } return false; },
         setBossHp: (n) => { if (this.boss && !this.boss.dead) { this.boss.health = n; } },
         // route a lethal player strike through the real combat pipeline so the
         // BOSS DOWN payoff (score/slowmo/banner/heal drop) fires exactly as in play.
@@ -365,7 +381,9 @@ export class GameScene extends Phaser.Scene {
     if (this.isBossWave) {
       // boss wave: a single climactic elite — no filler spawns, no event remix.
       this.spawnQueue = 1;
-      this.ui.banner('BOSS WAVE ' + n, '#ff3b30');
+      const variant = (Math.round(n / CONFIG.BOSS.WAVE_EVERY) % 2 === 1) ? 'slammer' : 'caster';
+      const name = CONFIG.BOSS.NAME[variant];
+      this.ui.banner('BOSS WAVE ' + n + ' \u2014 ' + name, '#ff3b30');
       this.cameras.main.shake(220, 0.012);
     } else {
       // rare-event director: occasionally remix this wave for variety. Rolled
@@ -388,6 +406,12 @@ export class GameScene extends Phaser.Scene {
     this.spawnTimer = (n === 1) ? CONFIG.RETENTION.WAVE1_FIRST_SPAWN : 0.3;
     this.waveFirstSpawn = true;
     this.audio && this.audio.wave(n);
+    // soundtrack follows the wave shape: boss waves get the driving intensity,
+    // normal waves relax back to the combat groove (unless we're mid-Second-Wind).
+    if (this.audio && this.audio.setMusicIntensity) {
+      if (this.isBossWave) this.audio.setMusicIntensity('boss');
+      else if (!this.player || !this.player.broken) this.audio.setMusicIntensity('combat');
+    }
   }
 
   spawnOne() {
@@ -463,16 +487,30 @@ export class GameScene extends Phaser.Scene {
   _spawnBoss() {
     const fromLeft = Math.random() < 0.5;
     const x = fromLeft ? CONFIG.WALL_LEFT + 40 : CONFIG.WALL_RIGHT - 40;
-    const e = new Enemy(this, x, CONFIG.GROUND_Y, 'boss');
+    // alternate boss archetypes so every climactic wave isn't the same duel:
+    // boss-index 1 (wave 5), 3 (15), 5 (25)... = the slammer; even indexes
+    // (wave 10, 20, 30...) = the caster. Only real boss waves (multiples of 5)
+    // use the parity rule; spawning off-context (e.g. the spawnBoss test hook
+    // mid-wave-1) defaults to the classic slammer so the canonical boss holds.
+    const isRealBossWave = (this.wave % CONFIG.BOSS.WAVE_EVERY === 0);
+    const variant = isRealBossWave
+      ? ((Math.round(this.wave / CONFIG.BOSS.WAVE_EVERY) % 2 === 1) ? 'boss' : 'bossCaster')
+      : 'boss';
+    const e = new Enemy(this, x, CONFIG.GROUND_Y, variant);
     e.facing = fromLeft ? 1 : -1;
     e.flankDir = fromLeft ? 1 : -1;
     this._applyScaling(e, this.wave);
-    if (this.spawned && this.spawned.boss != null) this.spawned.boss++;
+    if (this.spawned) {
+      if (this.spawned.boss != null) this.spawned.boss++;
+      if (variant === 'bossCaster' && this.spawned.bossCaster != null) this.spawned.bossCaster++;
+    }
     this.boss = e;
     this.enemies.push(e);
   }
 
-  // enrage callback: summon a pair of grunts near the boss to raise pressure.
+  // enrage callback: summon adds near the boss to raise pressure. The slammer
+  // summons grunts (melee pressure); the caster summons leapers (anti-air, to
+  // punish jump-dodging its barrage).
   _bossEnrage(boss) {
     this.ui.banner('THE BOSS IS ENRAGED!', '#ff6f5c');
     this._punchZoom(CONFIG.FEEL.ZOOM.HURT, 0, 0);
@@ -480,10 +518,11 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.shake(220, 0.016);
     this.audio && this.audio.bigHit();
     const n = CONFIG.BOSS.ENRAGE_SUMMONS;
+    const kind = (CONFIG.BOSS.ENRAGE_SUMMONS_KIND && CONFIG.BOSS.ENRAGE_SUMMONS_KIND[boss.bossKind]) || 'grunt';
     for (let i = 0; i < n; i++) {
       const side = i === 0 ? 1 : -1;
       const x = clamp(boss.x + side * 70, CONFIG.WALL_LEFT + 10, CONFIG.WALL_RIGHT - 10);
-      const e = new Enemy(this, x, CONFIG.GROUND_Y, 'grunt');
+      const e = new Enemy(this, x, CONFIG.GROUND_Y, kind);
       e.facing = -side;
       e.flankDir = side;
       this._applyScaling(e, this.wave);
@@ -596,7 +635,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ---- ranger projectiles (lobbed, gravity-driven) ----
-  spawnEnemyProjectile(x0, y0, x1, y1) {
+  // An optional dmgOverride lets the caster boss reuse this path with its own
+  // per-shot damage (the ranger uses the default R.PROJECTILE_DMG).
+  spawnEnemyProjectile(x0, y0, x1, y1, dmgOverride) {
     const R = CONFIG.CONTENT.RANGER;
     const g = CONFIG.GRAVITY;
     const dx = x1 - x0;
@@ -608,7 +649,7 @@ export class GameScene extends Phaser.Scene {
     const vy = (y1 - y0 - 0.5 * g * T * T) / T;
     this.projectiles.push({
       x: x0, y: y0, vx, vy, t: 0, life: R.PROJECTILE_LIFE, hit: false, dead: false,
-      dmg: Math.round(R.PROJECTILE_DMG * this.mods.enemyDmg),
+      dmg: Math.round((dmgOverride != null ? dmgOverride : R.PROJECTILE_DMG) * this.mods.enemyDmg),
     });
   }
 
@@ -789,6 +830,8 @@ export class GameScene extends Phaser.Scene {
     this.ui.banner('SECOND WIND!', '#ff3b30');
     this.ui.floatText('SHATTERED', p.x, p.y - 200, '#ff3b30', 34);
     this.audio && this.audio.gameover && this.audio.bigHit && this.audio.bigHit();
+    // the soundtrack turns desperate during the last stand.
+    this.audio && this.audio.setMusicIntensity && this.audio.setMusicIntensity('broken');
   }
 
   // REFORM: called from the health-pickup path while broken. Snaps the arm back
@@ -816,6 +859,10 @@ export class GameScene extends Phaser.Scene {
     this.ui.banner('REFORMED!  +' + bonus, '#6bff9e');
     this.ui.floatText('REFORMED!', p.x, p.y - 200, '#6bff9e', 36);
     this.audio && this.audio.combo && this.audio.combo(16);
+    // survival resolved — hand the soundtrack back to the wave's intensity.
+    if (this.audio && this.audio.setMusicIntensity) {
+      this.audio.setMusicIntensity(this.isBossWave ? 'boss' : 'combat');
+    }
   }
 
   // shatter-prop physics + draw (a detached stickman arm = two line segments)
@@ -1285,7 +1332,7 @@ export class GameScene extends Phaser.Scene {
 
   _updateHUD() {
     const alive = this.enemies.filter((e) => !e.dead);
-    const counts = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0, shielder: 0, bomber: 0, ranger: 0, boss: 0 };
+    const counts = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0, shielder: 0, bomber: 0, ranger: 0, boss: 0, bossCaster: 0 };
     for (const e of alive) if (counts[e.variant] != null) counts[e.variant]++;
     // boss HP for the top-of-screen bar (null when no boss is alive)
     const bossAlive = this.boss && !this.boss.dead ? this.boss : null;
@@ -1295,7 +1342,7 @@ export class GameScene extends Phaser.Scene {
       enemiesLeft: alive.length + this.spawnQueue,
       bestCombo: this.bestCombo,
       comboTimer: this.comboTimer, comboWindow: CONFIG.COMBO_WINDOW,
-      boss: bossAlive ? { hp: this.boss.health, maxHp: this.boss.maxHealth, enraged: this.boss.enraged } : null,
+      boss: bossAlive ? { hp: this.boss.health, maxHp: this.boss.maxHealth, enraged: this.boss.enraged, kind: this.boss.bossKind, name: CONFIG.BOSS.NAME[this.boss.bossKind] } : null,
       rage: Math.max(0, this.rageT), rageMax: this.rageMax,
       event: this.activeEvent,
       broken: this.player.broken, brokenT: this.player.brokenT, brokenMax: this.player.brokenMax,
@@ -1322,6 +1369,7 @@ export class GameScene extends Phaser.Scene {
         bossHp: bossAlive ? bossAlive.health : 0,
         bossMaxHp: bossAlive ? bossAlive.maxHealth : 0,
         bossEnraged: bossAlive ? bossAlive.enraged : false,
+        bossKind: bossAlive ? bossAlive.bossKind : null,
         shockwaves: this.shockwaves.length,
         pickups: this.pickups.length,
         firstBlood: this.firstBloodDone,
@@ -1337,6 +1385,8 @@ export class GameScene extends Phaser.Scene {
         brokenMax: this.player.brokenMax,
         secondWindUsed: this.player.secondWindUsed,
         reformed: !this.player.broken && this.player.secondWindUsed,
+        // generative-soundtrack state (observable for tests / debug)
+        music: this.audio && this.audio.getMusicState ? this.audio.getMusicState() : null,
       };
     }
   }

@@ -14,6 +14,9 @@ export class GameOverScene extends Phaser.Scene {
   create() {
     drawBackground(this);
     this.audio = this.registry.get('audio');
+    // fade the soundtrack out on death so the game-over stinger lands in space;
+    // the title restarts menu music when the player goes back.
+    this.audio && this.audio.stopMusic && this.audio.stopMusic();
     const cx = CONFIG.WIDTH / 2;
     let hsRaw = '0';
     try { hsRaw = localStorage.getItem('stickman_arena_hs') || '0'; } catch (e) {}

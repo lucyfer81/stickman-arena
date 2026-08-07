@@ -423,7 +423,8 @@ export class UIScene extends Phaser.Scene {
         }).setOrigin(0.5).setDepth(101);
       }
       this._bossLabel.setVisible(true);
-      this._bossLabel.setText(hud.boss.enraged ? 'BOSS  \u2014  ENRAGED' : 'BOSS');
+      const name = hud.boss.name || 'BOSS';
+      this._bossLabel.setText(hud.boss.enraged ? (name + '  \u2014  ENRAGED') : name);
     } else if (this._bossLabel) {
       this._bossLabel.setVisible(false);
     }

@@ -11,6 +11,9 @@ export class TitleScene extends Phaser.Scene {
   create() {
     drawBackground(this);
     this.audio = this.registry.get('audio');
+    // generative soundtrack: a calm bed on the title (becomes audible once the
+    // first gesture resumes the audio context), crossfading to combat on start.
+    this.audio && this.audio.startMusic && this.audio.startMusic('menu');
 
     const cx = CONFIG.WIDTH / 2;
 
@@ -189,6 +192,7 @@ export class TitleScene extends Phaser.Scene {
     this.starting = true;
     this.audio && this.audio.resume();
     this.audio && this.audio.start();
+    this.audio && this.audio.setMusicIntensity && this.audio.setMusicIntensity('combat');
     this.cameras.main.fadeOut(280);
     this.time.delayedCall(280, () => this.scene.start('Game'));
   }
