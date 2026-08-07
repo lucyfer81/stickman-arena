@@ -158,4 +158,44 @@ visual may repeat past wave 15 (add boss variety later). The two other
 proposals from this pass (punch/kick role split, low-HP berserk comeback)
 remain for the next iteration.
 
+### Round 3b — fun-first pass: punch/kick role split (combat depth)
+
+Bosses fixed the peaks, but the *bulk* of playtime (normal waves) was still
+monotonous: kick strictly dominated punch (16 vs 9 dmg, higher DPS too), so
+the optimal loop was kick-spam — the hardcore persona's "no game here" fix
+the leaper/boss only partly addressed. This pass gives every second of combat
+a real decision.
+
+### What shipped
+- **Punch damage 9 → 11**: punch DPS (≈35.5) now matches kick (≈34.8), so
+  punching is viable — lower per-hit/knockback but safe and fast.
+- **Punch → kick cancel**: pressing kick during a punch flows seamlessly into
+  a kick (combo rhythm). Turns button-mashing into a readable chain. Kick is
+  the committed move and cannot itself be cancelled.
+- **Kick whiff endlag**: a kick that reaches the end of its active window
+  *without connecting* switches to a longer recover (0.26 → 0.42s). Blind
+  kick-spam is now punishable by dodging runners; a connecting kick recovers
+  fast. (`attack.connected` is set by the combat resolver on hit and drives
+  the whiff branch.)
+
+### Verification
+- Official CI suite: 5/5 green. Boss suite: 3/3 green (unaffected).
+- New `tests/depth.spec.js`: 3/3 — punch deals exactly 11 dmg; a whiffed
+  kick's resolved `total` (0.62) is materially longer than a connecting
+  kick's (0.46); a punch cancels into a kick within the swing window (input
+  not dropped, as it was pre-change).
+
+### Fun-axis deltas
+| Axis | Before | After |
+|---|---|---|
+| Per-second decision variety | kick-spam optimal | punch / kick / cancel each have a role |
+| Risk/reward | kick strictly best | kick now whiff-punishable; punch is the safe option |
+| Skill expression | none (mash K) | mixing punch→kick is rewarded; whiffing kick is punished |
+| Applies to | n/a | every wave + boss waves |
+
+Resulting rock/paper/scissors: punch = safe combo-starter (vs fast runners),
+kick = committed finisher/spacing tool (vs brutes, boss recover windows),
+cancel = the skill-expression glue. Still proxy-measured; the remaining
+proposal (low-HP berserk comeback) is queued for a future pass.
+
 

@@ -18,7 +18,7 @@ export const CONFIG = {
     MAX_HEALTH: 100,
     HURT_INVULN: 0.5,
     PUNCH: {
-      DAMAGE: 9,
+      DAMAGE: 11,
       REACH: 78,
       HEIGHT: 70,
       WINDUP: 0.05,
@@ -35,6 +35,7 @@ export const CONFIG = {
       WINDUP: 0.08,
       ACTIVE: 0.12,
       RECOVER: 0.26,
+      RECOVER_WHIFF: 0.42,   // longer endlag when a kick misses -> punishable
       COOLDOWN: 0.05,
       KNOCKBACK: 560,
       HIT_PAUSE: 0.085,

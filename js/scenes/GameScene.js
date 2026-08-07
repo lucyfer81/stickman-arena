@@ -103,6 +103,26 @@ export class GameScene extends Phaser.Scene {
           b.takeHit(9999, this.player.x, 560, 0.18);
           if (b.dead) this._onPlayerHit(b, hb, true);
         },
+        // combat-depth probes: read first living enemy's HP, spawn a grunt at a
+        // fixed offset from the player, and snapshot player attack state.
+        firstEnemyHp: () => { const e = this.enemies.find((x) => !x.dead); return e ? e.health : null; },
+        spawnDummy: (dx, passive) => {
+          const e = new Enemy(this, this.player.x + (dx || 60), CONFIG.GROUND_Y, 'grunt');
+          e.facing = -1; e.flankDir = 1;
+          if (passive) { e.firstStrike = false; e.attackCd = 1e9; } // won't swing -> won't interrupt
+          this._applyScaling(e, Math.max(1, this.wave));
+          this.enemies.push(e);
+          return e.health;
+        },
+        playerState: () => ({
+          state: this.player.state,
+          attackType: this.player.attack ? this.player.attack.type : null,
+          phase: this.player.attack ? this.player.attack.phase : null,
+          t: this.player.attack ? this.player.attack.t : null,
+          total: this.player.attack ? this.player.attack.total : null,
+          connected: this.player.attack ? this.player.attack.connected : null,
+        }),
+        clearEnemies: () => { for (const e of this.enemies) if (!e.dead) { e.dead = true; e.destroy(); } this.enemies = []; this.boss = null; this.shockwaves = []; this.spawnQueue = 0; this.waveActive = false; },
       };
     }
 
@@ -322,6 +342,9 @@ export class GameScene extends Phaser.Scene {
         if (e.dead || e.lastSwing === p.swingId) continue;
         if (aabb(phb, e.bodyBox())) {
           e.lastSwing = p.swingId;
+          // record the connection so the player's whiff-penalty logic knows this
+          // swing landed (a missed kick recovers slower than a connecting one).
+          if (p.attack) p.attack.connected = true;
           // decide kill from pre-hit health so the death anim/K.O. feedback lines
           // up with takeHit's own <=0 check.
           const killed = e.health - phb.dmg <= 0;

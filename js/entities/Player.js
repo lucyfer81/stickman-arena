@@ -34,8 +34,12 @@ export class Player extends Stickman {
   tryAttack(type, faceDir) {
     if (this.dead || this.state === 'hurt') return;
     if (this.attack) {
-      // allow combo chain into kick near end of punch (light cancel), keep simple: no cancel
-      return;
+      // PUNCH -> KICK CANCEL: while a punch is in flight, a kick press flows
+      // seamlessly into a kick instead of being dropped. This rewards mixing
+      // attacks and turns mashing into a readable combo rhythm. (Kick is the
+      // committed, whiff-punishable move and cannot itself be cancelled.)
+      const canCancel = type === 'kick' && this.attack.type === 'punch';
+      if (!canCancel) return;
     }
     const C = type === 'kick' ? CONFIG.PLAYER.KICK : CONFIG.PLAYER.PUNCH;
     if (faceDir !== 0) this.facing = faceDir;
@@ -50,6 +54,8 @@ export class Player extends Stickman {
       peakTime: C.WINDUP + C.ACTIVE * 0.5,
       phase: 0,
       cfg: C,
+      connected: false,  // set true by the scene on a hit -> drives whiff endlag
+      whiffChecked: false,
     };
     this.state = type;
     if (type === 'punch') this.scene.audio && this.scene.audio.punch();
@@ -115,6 +121,16 @@ export class Player extends Stickman {
       // compute pose phase
       if (a.t <= a.peakTime) a.phase = 0.5 * (a.t / a.peakTime);
       else a.phase = 0.5 + 0.5 * clamp01((a.t - a.peakTime) / (a.total - a.peakTime));
+      // WHIFF PENALTY: exactly once, when the kick's active window ends without
+      // connecting, switch to a longer recover. Blind kick-spam is therefore
+      // punishable by dodging runners; a connecting kick recovers fast.
+      if (a.type === 'kick' && !a.whiffChecked && a.t >= a.windup + a.active) {
+        a.whiffChecked = true;
+        if (!a.connected) {
+          a.recover = a.cfg.RECOVER_WHIFF;
+          a.total = a.windup + a.active + a.recover;
+        }
+      }
       // friction on ground during attack
       this._physics(dt, true);
       // queue next attack near end of recover for combo feel handled by scene reading input
