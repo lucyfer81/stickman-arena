@@ -282,3 +282,54 @@ bomber 爆炸、陨石落地、shielder 格挡 clang、玩家硬落地（>720px/
 升级为"大爆炸 + 最大缩放 + 下压后坐 + 双层光环"。仍是代理指标（无真人手感），但覆盖了
 用户点名的全部 7 维（命中效果/屏震/冲击反馈/粒子/预备/攻击时机/相机运动）。
 
+### Round 7 — 记忆点机制：Second Wind「破碎」（唯一的"意外"机制）
+
+以创意总监视角：游戏已稳、已 juice，缺的是**玩家会主动讲给别人听**的意外瞬间。
+不做通用功能（额外命/复活币太常见）。目标是颠覆格斗游戏最核心的预期——**0 血=死亡**。
+
+**机制：Second Wind「破碎」——每局一次，0 血不灭。**
+- 玩家血量归 0 时，**不立即死亡**（每局仅一次）。火柴人**碎裂**：右臂脱落成物理残肢
+  飞出落地，画面去饱和泛红边晕，心跳脉动。
+- 进入 **6 秒「破碎」窗口**：1 血（再挨一下即死）、伤害 ×2、移速 ×1.3——孤注一掷的反扑。
+- 窗口内每杀一敌：**计时器 +1.2s** 且 **55% 概率掉血包**。
+- 拾取血包 = **「重塑」(REFORM)**：手臂秒回、色彩回流、血量回到 40%、慢镜、
+  "REFORMED!"横幅、+750 分。局继续。
+- 计时器归零 或 窗口内挨打 = 真死。
+- `secondWindUsed` 保证每局只触发一次——是珍贵的故事瞬间，不是拐杖。
+
+**为何"意外/可记忆"而非通用**：①颠覆"0 血即死"这个承载性预期；②断臂+接回的视觉**只有
+火柴人能做**（线条会散开/拼回，把美术风格用到了骨子里）；③"残血断臂单挑 boss 后捡血重塑"
+是会发群的瞬间；④每局一次保持稀缺性，永远是故事而非套路。
+
+**改动（复用现有系统，新增面极小）：**
+- `config.js`：新增 `LASTSTAND` 调参块（时长/击杀延时/掉血概率/伤害移速倍率/重塑血量分数/入场无敌）。
+- `Player.js`：`broken`/`brokenT`/`secondWindUsed` 状态；`takeHit` 致死分支路由到 `_enterBroken()`
+  （而非 `die()`）；`update` 计时器归零→真死；移速倍率；`_render` 设 `limbMask.dropRightArm`。
+- `Stickman.js`：`render` 支持 `limbMask`——破碎时跳过右臂两段线/肘关节/右拳绘制（视觉"断臂"）。
+- `GameScene.js`：`_onEnterBroken`（碎裂反馈峰值：慢镜+顿帧+双层环+最大缩放+下压后坐+残肢prop+
+  保底血包 lifeline+"SECOND WIND!"横幅）；`_reform`（金色回流：慢镜+环+缩放+双色粒子+
+  "REFORMED! +N"横幅）；`_updateDebris`（残肢物理+绘制）；`_updateVeil`（去饱和+红色边晕+心跳）；
+  `_resolveCombat` 伤害倍率叠加 broken；`_onPlayerHit` 击杀窗口加时+掉血；血包拾取分支→重塑；
+  新增 `debrisLayer`(depth9)/`veilLayer`(depth220)；HUD/遥测加 broken/brokenT/secondWindUsed/reformed；
+  `__test` 钩子 enterSecondWind/reform/fastForwardBroken。
+- `UIScene.js`：底部居中「SECOND WIND」倒计时条（危险段加快脉动+变色）。
+- 设计文档：`docs/superpowers/specs/2026-08-07-second-wind-design.md`。
+
+**验证（趣味代理指标 + 视觉确认）：**
+- 官方 CI 5/5 绿（desktop×3 + mobile 横/竖）。
+- 新增 `tests/laststand.spec.js` 4/4 绿：①致死触发破碎（血=1、secondWindUsed、保底血包、非dying）；
+  ②血包重塑（清broken、血>1、加分）；③窗口击杀加时（brokenT 不降反升）；④计时归零→真死→
+  gameover；重塑后第二次致死必须真死（每局一次）。
+- 新增 `tests/eval-secondwind.spec.js`（eval project）：真实战斗管线致死→破碎→窗口内还手→
+  拾血重塑，全程无 error。即机制在真实对局里自然发生。
+- 全 dev 套件回归绿（depth3/boss3/variety10/retention5/qa7/combo/difficulty/onboard/meta/volume
+  共 34 项）——未破坏既有平衡。
+- imgstat 色彩对比确认视觉戏剧性：破碎帧 red=14504 主导（红晕+去饱和）、reform 帧 red=199/
+  cyan=12419（色彩回流），即"颜色重新灌入"瞬间由数据可读。
+
+**趣味评估**：这轮攻"记忆点"而非稳定性——制造玩家会截图发群的意外瞬间。破碎→重塑的弧线
+把"差点死"变成"差点死然后单臂反杀捡血重塑"的故事。断臂/接回是火柴人专属的视觉钩子。
+仍是代理指标（无真人手感）；未来可加：破碎期间的专属动作（头槌/绝望一击）、重塑后的短暂
+"完美态"、或把 Second Wind 计数接入 meta 解锁（"曾重塑 N 次"徽章）。
+
+

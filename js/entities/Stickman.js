@@ -206,6 +206,11 @@ export class Stickman extends Phaser.GameObjects.Graphics {
     const limb = pal.limb;
     const joint = pal.joint;
     const a = this._alpha;
+    // SECOND WIND: an optional limb mask lets a caller drop segments (e.g. the
+    // shattered right arm during the broken last-stand). Each entry names the
+    // two segment keys that should NOT be drawn.
+    const mask = this.limbMask || {};
+    const skip = (ka, kb) => !!(mask.dropRightArm && (ka === 'neck' && kb === 'elbowR' || ka === 'elbowR' && kb === 'handR'));
 
     // soft aura behind torso
     const torso = p(pose.neck);
@@ -220,7 +225,7 @@ export class Stickman extends Phaser.GameObjects.Graphics {
     };
 
     // dark outline pass (pops against bg)
-    const seg = (x, y) => seg2(x, y, lw + 4, 0x05070d, a);
+    const seg = (x, y) => { if (skip(x, y)) return; seg2(x, y, lw + 4, 0x05070d, a); };
     seg('hip', 'neck');
     seg('hip', 'kneeL'); seg('kneeL', 'footL');
     seg('hip', 'kneeR'); seg('kneeR', 'footR');
@@ -228,7 +233,7 @@ export class Stickman extends Phaser.GameObjects.Graphics {
     seg('neck', 'elbowR'); seg('elbowR', 'handR');
 
     // bright color pass
-    const col = (x, y) => seg2(x, y, lw, limb, a);
+    const col = (x, y) => { if (skip(x, y)) return; seg2(x, y, lw, limb, a); };
     col('hip', 'neck');
     col('hip', 'kneeL'); col('kneeL', 'footL');
     col('hip', 'kneeR'); col('kneeR', 'footR');
@@ -238,6 +243,8 @@ export class Stickman extends Phaser.GameObjects.Graphics {
     // joints
     this.fillStyle(joint, a);
     for (const j of [pose.kneeL, pose.kneeR, pose.elbowL, pose.elbowR, pose.hip]) {
+      // hide the right elbow joint when the arm is gone
+      if (mask.dropRightArm && j === pose.elbowR) continue;
       const q = p(j);
       this.fillCircle(q.x, q.y, lw * 0.5);
     }
@@ -268,7 +275,7 @@ export class Stickman extends Phaser.GameObjects.Graphics {
         this.fillCircle(q.x, q.y, baseR);
       }
     };
-    drawFist(pose.handR, true);
+    if (!mask.dropRightArm) drawFist(pose.handR, true);
     drawFist(pose.handL, false);
 
     // feet
