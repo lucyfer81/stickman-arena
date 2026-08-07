@@ -3,7 +3,7 @@ import { Player } from '../entities/Player.js';
 import { Enemy } from '../entities/Enemy.js';
 import { Pickup } from '../entities/Pickup.js';
 import { drawBackground } from '../utils/background.js';
-import { aabb, clamp, sign, rand, randInt } from '../utils/math.js';
+import { aabb, clamp, clamp01, sign, rand, randInt } from '../utils/math.js';
 import { Meta } from '../systems/Meta.js';
 
 export class GameScene extends Phaser.Scene {
@@ -16,8 +16,12 @@ export class GameScene extends Phaser.Scene {
 
     this.shadows = this.add.graphics().setDepth(5);
     this.fxLayer = this.add.graphics().setDepth(20); // hit sparks drawn directly
+    this.shockLayer = this.add.graphics().setDepth(19); // boss ground-slam shockwaves
     this.enemies = [];
     this.pickups = [];
+    this.shockwaves = [];
+    this.boss = null;            // live boss reference (for the HP bar + payoff)
+    this.isBossWave = false;     // every 5th wave is a single-boss encounter
     this.score = 0;
     this.combo = 0;
     this.comboTimer = 0;
@@ -86,6 +90,19 @@ export class GameScene extends Phaser.Scene {
         // to advance waves without creating a corpse backlog that interacts with
         // the spawn gate / death-tween behaviour.
         despawnEnemies: () => { for (const e of this.enemies) if (!e.dead) { e.dead = true; e.destroy(); } },
+        // skip straight to a boss wave (default wave 5) so boss logic can be
+        // exercised without playing through 4 normal waves.
+        gotoBossWave: (n) => { for (const e of this.enemies) e.destroy(); this.enemies = []; this.boss = null; this.shockwaves = []; this.startWave(n || CONFIG.BOSS.WAVE_EVERY); },
+        spawnBoss: () => { this._spawnBoss(); },
+        setBossHp: (n) => { if (this.boss && !this.boss.dead) { this.boss.health = n; } },
+        // route a lethal player strike through the real combat pipeline so the
+        // BOSS DOWN payoff (score/slowmo/banner/heal drop) fires exactly as in play.
+        killBoss: () => {
+          const b = this.boss; if (!b || b.dead) return;
+          const hb = { dmg: 9999, kb: 560, pause: 0.18, from: this.player.x };
+          b.takeHit(9999, this.player.x, 560, 0.18);
+          if (b.dead) this._onPlayerHit(b, hb, true);
+        },
       };
     }
 
@@ -165,15 +182,24 @@ export class GameScene extends Phaser.Scene {
   startWave(n) {
     this.wave = n;
     this.waveActive = true;
-    const extra = (this.mods && this.mods.extraPerWave) || 0;
-    const count = Math.min(2 + Math.floor(n * 0.9) + extra, 9);
-    this.spawnQueue = count;
+    this.isBossWave = (n % CONFIG.BOSS.WAVE_EVERY === 0);
+    if (this.isBossWave) {
+      // boss wave: a single climactic elite — no filler spawns.
+      this.spawnQueue = 1;
+      this.ui.banner('BOSS WAVE ' + n, '#ff3b30');
+      this.cameras.main.shake(220, 0.012);
+    } else {
+      const extra = (this.mods && this.mods.extraPerWave) || 0;
+      const count = Math.min(2 + Math.floor(n * 0.9) + extra, 9);
+      this.spawnQueue = count;
+      this.ui.banner('WAVE ' + n, n === 1 ? '#35e1ff' : '#ffd23f');
+    }
     this.spawnTimer = 0.3;
-    this.ui.banner('WAVE ' + n, n === 1 ? '#35e1ff' : (n % 5 === 0 ? '#ff3b30' : '#ffd23f'));
     this.audio && this.audio.wave(n);
   }
 
   spawnOne() {
+    if (this.isBossWave) return this._spawnBoss();
     const n = this.wave;
     let variant = 'grunt';
     const r = Math.random();
@@ -190,15 +216,99 @@ export class GameScene extends Phaser.Scene {
     // LIVING enemies only — lingering death-anims would otherwise skew the count.
     const aliveCount = this.enemies.filter((e) => !e.dead).length;
     e.flankDir = (aliveCount % 2 === 0) ? (fromLeft ? 1 : -1) : (fromLeft ? -1 : 1);
+    this._applyScaling(e, n);
+    this.enemies.push(e);
+  }
+
+  // shared wave/difficulty scaling — used by normal spawns, the boss, and
+  // enrage-summoned adds so the whole curve stays consistent.
+  _applyScaling(e, n) {
+    const m = this.mods;
     // wave-based scaling — steeper so late waves actually threaten; difficulty
     // preset + daily modifier multiply on top so the whole curve shifts.
-    const m = this.mods;
     e.speedMul = (1 + Math.min(n, 15) * 0.045) * m.enemySpeed;
     e.hpMul = (1 + Math.min(n, 15) * 0.075) * m.enemyHp;
     e.aggrMul = (0.8 + Math.min(n - 1, 8) * 0.07) * m.aggr; // wave1 gentle, wave9+ fierce
     e.dmgMul = m.enemyDmg;
     e.health = e.maxHealth = e.maxHealth * e.hpMul;
+  }
+
+  _spawnBoss() {
+    const fromLeft = Math.random() < 0.5;
+    const x = fromLeft ? CONFIG.WALL_LEFT + 40 : CONFIG.WALL_RIGHT - 40;
+    const e = new Enemy(this, x, CONFIG.GROUND_Y, 'boss');
+    e.facing = fromLeft ? 1 : -1;
+    e.flankDir = fromLeft ? 1 : -1;
+    this._applyScaling(e, this.wave);
+    if (this.spawned && this.spawned.boss != null) this.spawned.boss++;
+    this.boss = e;
     this.enemies.push(e);
+  }
+
+  // enrage callback: summon a pair of grunts near the boss to raise pressure.
+  _bossEnrage(boss) {
+    this.ui.banner('THE BOSS IS ENRAGED!', '#ff6f5c');
+    this.cameras.main.shake(200, 0.014);
+    this.audio && this.audio.bigHit();
+    const n = CONFIG.BOSS.ENRAGE_SUMMONS;
+    for (let i = 0; i < n; i++) {
+      const side = i === 0 ? 1 : -1;
+      const x = clamp(boss.x + side * 70, CONFIG.WALL_LEFT + 10, CONFIG.WALL_RIGHT - 10);
+      const e = new Enemy(this, x, CONFIG.GROUND_Y, 'grunt');
+      e.facing = -side;
+      e.flankDir = side;
+      this._applyScaling(e, this.wave);
+      this.enemies.push(e);
+    }
+  }
+
+  // ---- boss ground-slam shockwaves ----
+  // A shockwave races along the floor; the player must jump (feet rise above
+  // SHOCKWAVE_CLEAR px) to clear it. Standing still = guaranteed hit.
+  spawnShockwave(x, dir, speed) {
+    this.shockwaves.push({
+      x, dir, speed, life: CONFIG.BOSS.SHOCKWAVE_LIFE, t: 0, hit: false, dead: false,
+    });
+  }
+
+  _updateShockwaves(dt) {
+    const g = this.shockLayer;
+    g.clear();
+    const p = this.player;
+    const clear = CONFIG.BOSS.SHOCKWAVE_CLEAR;
+    for (const s of this.shockwaves) {
+      if (s.dead) continue;
+      s.t += dt;
+      s.life -= dt;
+      s.x += s.dir * s.speed * dt;
+      if (s.x < CONFIG.WALL_LEFT - 30 || s.x > CONFIG.WALL_RIGHT + 30 || s.life <= 0) {
+        s.dead = true; continue;
+      }
+      // collision: only catches a player whose feet are still near the ground.
+      // feetClear = how high the feet have lifted above the floor.
+      const feetClear = CONFIG.GROUND_Y - p.y;
+      if (!p.dead && p.invuln <= 0 && !s.hit && feetClear < clear && Math.abs(p.x - s.x) < 42) {
+        s.hit = true;
+        const dmg = Math.round(CONFIG.BOSS.SHOCKWAVE_DAMAGE * this.mods.enemyDmg);
+        if (p.takeHit(dmg, s.x, CONFIG.ENEMY.KNOCKBACK)) this._onPlayerHurt(null, { from: s.x });
+      }
+    }
+    // draw surviving shockwaves
+    for (const s of this.shockwaves) {
+      if (s.dead) continue;
+      const fade = clamp01(s.life / 0.6);
+      const a = Math.min(1, fade) * (s.hit ? 0.5 : 1);
+      // leading vertical "wall" + radiating arc + ground ripple
+      g.lineStyle(5, 0xff3b30, a);
+      g.lineBetween(s.x, CONFIG.GROUND_Y, s.x, CONFIG.GROUND_Y - 78);
+      g.lineStyle(3, 0xffd23f, a * 0.85);
+      g.beginPath();
+      g.arc(s.x, CONFIG.GROUND_Y, 46, Math.PI, 2 * Math.PI);
+      g.strokePath();
+      g.lineStyle(2, 0xff8a3d, a * 0.6);
+      g.strokeEllipse(s.x, CONFIG.GROUND_Y + 4, 84, 16);
+    }
+    this.shockwaves = this.shockwaves.filter((s) => !s.dead);
   }
 
   // ---- combat ----
@@ -258,6 +368,23 @@ export class GameScene extends Phaser.Scene {
     this._checkComboTier();
     if (killed) {
       this.kills++;
+      // BOSS payoff: a climactic moment — long slow-mo, big shake, banner,
+      // guaranteed heal drop, huge score. Worth the climb.
+      if (enemy.isBoss) {
+        this.boss = null;
+        this.slowmo = Math.max(this.slowmo, 0.5);
+        this.hitPause = Math.max(this.hitPause, 0.18);
+        this.cameras.main.shake(300, 0.026);
+        this.burst(enemy.x, enemy.y - 80 * enemy.scale, 0xffd23f, 60);
+        this.burst(enemy.x, enemy.y - 80 * enemy.scale, 0xff3b30, 40);
+        const bonus = Math.round(CONFIG.BOSS.SCORE * this.mods.scoreMul);
+        this.score += bonus;
+        this.ui.banner('BOSS DOWN!  +' + bonus, '#ffd23f');
+        this.ui.floatText('BOSS DOWN!', enemy.x, enemy.y - 200 * enemy.scale, '#ffd23f', 40);
+        this.pickups.push(new Pickup(this, enemy.x, enemy.y - 60));
+        this.audio && this.audio.bigHit();
+        return;
+      }
       const gain2 = Math.round(enemy.v.score * mult * this.mods.scoreMul);
       this.score += gain2;
       this.burst(enemy.x, enemy.y - 70 * enemy.scale, enemy.v.palette.accent, 26);
@@ -411,6 +538,7 @@ export class GameScene extends Phaser.Scene {
     this.pickups = this.pickups.filter((p) => p.scene);
 
     this._resolveCombat();
+    this._updateShockwaves(stepDt);
 
     // combo timer
     if (this.comboTimer > 0) {
@@ -443,14 +571,17 @@ export class GameScene extends Phaser.Scene {
 
   _updateHUD() {
     const alive = this.enemies.filter((e) => !e.dead);
-    const counts = { grunt: 0, runner: 0, brute: 0, leaper: 0 };
+    const counts = { grunt: 0, runner: 0, brute: 0, leaper: 0, boss: 0 };
     for (const e of alive) if (counts[e.variant] != null) counts[e.variant]++;
+    // boss HP for the top-of-screen bar (null when no boss is alive)
+    const bossAlive = this.boss && !this.boss.dead ? this.boss : null;
     this.registry.set('hud', {
       health: this.player.health, maxHealth: this.player.maxHealth,
       score: this.score, wave: this.wave, combo: this.combo,
       enemiesLeft: alive.length + this.spawnQueue,
       bestCombo: this.bestCombo,
       comboTimer: this.comboTimer, comboWindow: CONFIG.COMBO_WINDOW,
+      boss: bossAlive ? { hp: this.boss.health, maxHp: this.boss.maxHealth, enraged: this.boss.enraged } : null,
     });
     if (typeof window !== 'undefined') {
       window.__stickman = {
@@ -469,6 +600,13 @@ export class GameScene extends Phaser.Scene {
         kills: this.kills,
         daily: this.daily ? this.daily.name : null,
         scoreMul: this.mods && this.mods.scoreMul,
+        isBossWave: this.isBossWave,
+        bossActive: !!(bossAlive),
+        bossHp: bossAlive ? bossAlive.health : 0,
+        bossMaxHp: bossAlive ? bossAlive.maxHealth : 0,
+        bossEnraged: bossAlive ? bossAlive.enraged : false,
+        shockwaves: this.shockwaves.length,
+        pickups: this.pickups.length,
       };
     }
   }

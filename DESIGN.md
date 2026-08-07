@@ -116,4 +116,46 @@ model + leaper), onboarding, readable combos, player-chosen challenge,
 persistent goals + cosmetics, and a daily hook — the full arcade retention
 loop.
 
+## Round 3 — fun-first pass: Boss waves (climactic encounters)
+
+The audit items were all shipped, so the next pass was pure **fun**, not
+stability. Designer review found the #1 fun-killer was *structural*: every
+wave had the same shape (wave 7 was just "wave 1 with bigger numbers"), no
+peaks, no climax, no stories. The fix: punctuate the loop with boss duels.
+
+### What shipped
+- **Boss enemy** every 5th wave — a big (1.6×) elite with boss-tier HP, a
+  top-spanning HP bar, and a unique **ground-slam**: a 0.7s telegraphed
+  charge → leap → twin **shockwaves** race outward along the floor. The
+  shockwaves only hit a grounded player, so the counter is to **jump** — a
+  new moment-to-moment decision the kick-spam optimum never demanded.
+- **Enrage phase** at ≤50% HP: faster + summons 2 grunts once (drama spike
+  mid-fight).
+- **Climactic payoff** on boss death: 0.5s slow-mo + hit-pause + heavy
+  shake + 100-particle burst + "BOSS DOWN! +1500" banner + guaranteed heal
+  drop — the single strongest feedback peak in the game.
+- Slam has full super-armor once committed; the *counter is jumping*, not
+  staggering — a clean rock/paper/scissors beat.
+
+### Verification
+- Official CI suite: 5/5 green (desktop ×3, mobile-landscape, mobile-portrait).
+- New `tests/boss.spec.js`: 3/3 — boss spawns on wave 5 with HP bar; real-
+  pipeline kill fires the +1500 payoff + heal drop + wave clear; slam emits
+  shockwaves that clip a grounded player; jumping clears them.
+- Hardcore 90s playthrough: clean (no errors), boss telemetry flowing.
+
+### Fun-axis deltas (structural/mechanical proxies)
+| Axis | Before | After |
+|---|---|---|
+| Climactic peaks | none (flat curve) | boss duel + slow-mo every 5 waves |
+| Story potential | "reached wave N" | "beat the wave-5 boss at low HP" |
+| Per-moment decisions | kick-spam optimal | must jump shockwaves on boss waves |
+| Structural variety | every wave identical | boss waves break the pattern |
+| Quit-point risk | "samey" after 3–4 waves | a wave-5 goal to push toward |
+
+Honest caveats: fun is measured via proxies here, not human feel; one boss
+visual may repeat past wave 15 (add boss variety later). The two other
+proposals from this pass (punch/kick role split, low-HP berserk comeback)
+remain for the next iteration.
+
 

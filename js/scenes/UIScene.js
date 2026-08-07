@@ -346,6 +346,33 @@ export class UIScene extends Phaser.Scene {
       this.comboText.setAlpha(Math.max(0, this.comboText.alpha - 6 * dt));
     }
 
+    // boss health bar — spans the top center while a boss is alive. A distinct
+    // red/gold fixture so the climactic encounter reads as a real duel.
+    if (hud.boss) {
+      const bx = CONFIG.WIDTH / 2 - 340, by = 110, bw = 680, bh = 22;
+      g.fillStyle(0x000000, 0.55);
+      g.fillRoundedRect(bx - 4, by - 4, bw + 8, bh + 8, 6);
+      g.fillStyle(0x1a0c0c, 0.95);
+      g.fillRoundedRect(bx, by, bw, bh, 5);
+      const frac = clamp(hud.boss.hp / hud.boss.maxHp, 0, 1);
+      // flash gold under 50% (enrage) for tension
+      const bcol = hud.boss.enraged ? 0xff6f5c : (frac < 0.5 ? 0xff8a3d : 0xff3b30);
+      g.fillStyle(bcol, 1);
+      g.fillRoundedRect(bx, by, Math.max(0, bw * frac), bh, 5);
+      g.lineStyle(2, 0xffd23f, 0.8);
+      g.strokeRoundedRect(bx, by, bw, bh, 5);
+      if (!this._bossLabel) {
+        this._bossLabel = this.add.text(CONFIG.WIDTH / 2, by + bh / 2, 'BOSS', {
+          fontFamily: 'Arial Black', fontSize: '15px', color: '#ffd23f',
+          stroke: '#0b1a2a', strokeThickness: 4,
+        }).setOrigin(0.5).setDepth(101);
+      }
+      this._bossLabel.setVisible(true);
+      this._bossLabel.setText(hud.boss.enraged ? 'BOSS  \u2014  ENRAGED' : 'BOSS');
+    } else if (this._bossLabel) {
+      this._bossLabel.setVisible(false);
+    }
+
     this._updateOnboarding(dt);
   }
 

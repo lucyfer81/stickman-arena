@@ -56,6 +56,30 @@ export const CONFIG = {
   COMBO_WINDOW: 2.2,
   COMBO_TIERS: [5, 10, 15, 20, 30],   // milestone combos -> bonus + banner
   COMBO_TIER_BONUS: 100,              // flat score bonus per milestone
+
+  // Boss waves — every BOSS_WAVE_EVERY-th wave spawns a single elite boss
+  // with a telegraphed ground-slam that emits shockwaves the player must jump.
+  BOSS: {
+    WAVE_EVERY: 5,
+    HEALTH: 220,
+    DAMAGE: 18,
+    SPEED: 95,
+    SCALE: 1.6,
+    ATTACK_REACH: 120,
+    SCORE: 1500,
+    SLAM_INTERVAL: 3.4,           // seconds between slams (phase 1)
+    SLAM_INTERVAL_ENRAGED: 2.2,   // phase 2 (<=50% hp)
+    SLAM_WINDUP: 0.7,             // telegraph duration — the must-jump cue
+    SLAM_LEAP_VX: 360,
+    SLAM_LEAP_VY: 760,
+    SLAM_RECOVER: 0.55,
+    ENRAGE_AT: 0.5,               // hp fraction that triggers phase 2 + minions
+    ENRAGE_SUMMONS: 2,            // grunts spawned on enrage
+    SHOCKWAVE_SPEED: 430,
+    SHOCKWAVE_LIFE: 2.6,
+    SHOCKWAVE_DAMAGE: 12,
+    SHOCKWAVE_CLEAR: 34,          // feet must rise this many px to jump over
+  },
 };
 
 // Difficulty presets — multiplied into enemy stats at spawn + player HP.

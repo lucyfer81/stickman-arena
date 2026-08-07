@@ -28,6 +28,7 @@ module.exports = defineConfig({
   expect: { timeout: 10000 },
   use: { baseURL: 'http://localhost:8080' },
   projects: [
+    project('boss',        /boss\.spec\.js/,        120000),
     project('combo',       /combo\.spec\.js/,        90000),
     project('diag',        /diagnostic\.spec\.js/,  300000),
     project('difficulty',  /difficulty\.spec\.js/,   90000),

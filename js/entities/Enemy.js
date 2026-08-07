@@ -23,6 +23,12 @@ const VARIANTS = {
     palette: { limb: 0xffb02e, joint: 0xffd98a, head: 0xffeec0, accent: 0xff7a00, fist: 0xffe26b },
     health: 24, speed: 195, damage: 13, scale: 0.96, score: 220, attackReach: 96,
   },
+  boss: {
+    // elite climactic enemy for boss waves (every 5th wave). Big, tough, and
+    // performs a telegraphed ground-slam whose shockwaves must be jumped.
+    palette: { limb: 0xff3b30, joint: 0xffb4a8, head: 0xffe0d8, accent: 0xffd23f, fist: 0xff8a3d },
+    health: 220, speed: 95, damage: 18, scale: 1.6, score: 1500, attackReach: 120,
+  },
 };
 
 export class Enemy extends Stickman {
@@ -54,6 +60,11 @@ export class Enemy extends Stickman {
     this.dmgMul = 1;
     this.aggrMul = 1;     // wave-dependent aggression (lower recover/cooldown)
     this.flankDir = 1;    // desired side relative to player (+1 right / -1 left)
+    // boss-only state
+    this.isBoss = variant === 'boss';
+    this.enraged = false;
+    this.slam = null;     // { phase: 'windup'|'leap'|'recover', t }
+    this.slamCd = this.isBoss ? 2.0 : 0;  // first slam after a brief grace
   }
 
   bodyBox() {
@@ -77,6 +88,12 @@ export class Enemy extends Stickman {
       this.attack = null; this.glow = 0;
       this.vx = dir * kb; this.vy = -200; this.onGround = false; this.facing = -dir;
       this.state = 'hurt'; this.hurtTime = 0;
+      return true;
+    }
+    // BOSS SLAM super-armor: once the boss commits to a slam (past windup), it
+    // cannot be interrupted by anything short of death. The telegraphed counter
+    // is to JUMP the shockwave, not to stagger the dive.
+    if (this.isBoss && this.slam && this.slam.phase !== 'windup') {
       return true;
     }
     if (phase === 'windup' || phase === 'active') {
@@ -138,6 +155,18 @@ export class Enemy extends Stickman {
       return;
     }
 
+    // BOSS enrage crossing (once): phase 2 — faster, summons minions.
+    if (this.isBoss && !this.enraged && this.health <= this.maxHealth * CONFIG.BOSS.ENRAGE_AT) {
+      this._enrage();
+    }
+
+    if (this.slam) {
+      this._progressSlam(dt, player);
+      this._physics(dt);
+      this._render();
+      return;
+    }
+
     if (this.attack) {
       this._progressAttack(dt);
       this._physics(dt);
@@ -165,6 +194,18 @@ export class Enemy extends Stickman {
     const standoff = Math.abs(this.x - desiredX);
     // leaper commits from farther out (it dives to close the gap)
     const commitRange = reach * (this.variant === 'leaper' ? 1.15 : 0.82);
+
+    // BOSS: periodic ground-slam special — the dramatic, must-be-jumped attack
+    // that radiates shockwaves. Takes priority over a normal melee swing.
+    if (this.isBoss) {
+      this.slamCd -= dt;
+      if (this.onGround && this.slamCd <= 0 && dist < 760) {
+        this._startSlam();
+        this._physics(dt);
+        this._render();
+        return;
+      }
+    }
 
     if (dist > commitRange || standoff > 30) {
       // reposition toward the flank slot (keeps enemies on both sides)
@@ -243,6 +284,72 @@ export class Enemy extends Stickman {
     }
   }
 
+  // ---- boss ground-slam special ----
+  _startSlam() {
+    this.slam = { phase: 'windup', t: 0 };
+    this.glow = 0;
+    this.state = 'idle';
+  }
+
+  _progressSlam(dt, player) {
+    const a = this.slam;
+    const B = CONFIG.BOSS;
+    a.t += dt;
+    if (a.phase === 'windup') {
+      // TELEGRAPH: glow ramps to full so the player reads the incoming slam and
+      // gets ready to jump. Hold position, face the player.
+      this.facing = sign(player.x - this.x) || this.facing;
+      this.glow = clamp01(a.t / B.SLAM_WINDUP);
+      this.vx *= clamp01(1 - 8 * dt);
+      if (a.t >= B.SLAM_WINDUP) {
+        a.phase = 'leap'; a.t = 0; this.glow = 1;
+        const dir = sign(player.x - this.x) || this.facing;
+        this.vx = dir * B.SLAM_LEAP_VX;
+        this.vy = -B.SLAM_LEAP_VY;
+        this.onGround = false;
+        this.scene.audio && this.scene.audio.kick();
+      }
+      return;
+    }
+    if (a.phase === 'leap') {
+      // committed arc — on landing, radiate shockwaves outward along the ground.
+      if (this.onGround) {
+        this._slamImpact();
+        a.phase = 'recover'; a.t = 0; this.glow = 0.3;
+      }
+      return;
+    }
+    // recover: brief vulnerable pause before the next slam cycle
+    this.vx *= clamp01(1 - 10 * dt);
+    if (a.t >= B.SLAM_RECOVER) {
+      this.slam = null;
+      this.slamCd = this.enraged ? B.SLAM_INTERVAL_ENRAGED : B.SLAM_INTERVAL;
+      this.glow = 0;
+      this.state = 'idle';
+    }
+  }
+
+  _slamImpact() {
+    const B = CONFIG.BOSS;
+    // twin shockwaves race outward along the floor — the player must be airborne
+    // to clear them. (Scene owns collision/draw; boss just emits.)
+    if (this.scene.spawnShockwave) {
+      this.scene.spawnShockwave(this.x, 1, B.SHOCKWAVE_SPEED);
+      this.scene.spawnShockwave(this.x, -1, B.SHOCKWAVE_SPEED);
+    }
+    this.scene.cameras.main.shake(190, 0.02);
+    this.scene.dustBurst && this.scene.dustBurst(this.x, CONFIG.GROUND_Y, 24);
+    this.scene.audio && this.scene.audio.bigHit();
+  }
+
+  _enrage() {
+    this.enraged = true;
+    this.speedMul *= 1.25;
+    this.aggrMul *= 1.2;
+    this.flashTime = 0.3;
+    if (this.scene._bossEnrage) this.scene._bossEnrage(this);
+  }
+
   _physics(dt) {
     this.vy += CONFIG.GRAVITY * dt;
     this.x += this.vx * dt;
@@ -266,6 +373,12 @@ export class Enemy extends Stickman {
     let anim;
     if (this.dead) {
       anim = { state: 'dead', time: this.animTime, deadT: this.deadT };
+    } else if (this.slam) {
+      // boss slam: windup reads as a charging punch, the leap as an airborne
+      // tuck, recover as settling idle — so each phase is instantly legible.
+      if (this.slam.phase === 'leap') anim = { state: 'jump', vy: -this.vy };
+      else if (this.slam.phase === 'windup') anim = { state: 'punch', phase: 0.18 };
+      else anim = { state: 'idle', time: this.animTime };
     } else if (this.attack && this.attack.leap) {
       // a diving leaper reads as an airborne tuck, not a grounded punch
       anim = { state: 'jump', vy: -this.vy };
