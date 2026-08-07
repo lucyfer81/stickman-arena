@@ -1,18 +1,29 @@
 import { CONFIG } from '../config.js';
-import { clamp } from '../utils/math.js';
 
-// A glowing health pickup that drops from defeated enemies.
+// A glowing pickup. Three types share one entity: health (cyan cross, +HP),
+// rage (red/orange bolt, temporary buff), score (gold gem, instant points).
+// The scene reads `type` + `_collected` on collision and applies the effect.
+const STYLE = {
+  health: { glow: 0x35e1ff, body: 0x0a1220, edge: 0x35e1ff, mark: 0xeaf4ff },
+  rage:   { glow: 0xff8a3d, body: 0x1a0a08, edge: 0xff3b30, mark: 0xffe26b },
+  score:  { glow: 0xffd23f, body: 0x14110a, edge: 0xffd23f, mark: 0xffffff },
+};
+
 export class Pickup extends Phaser.GameObjects.Graphics {
-  constructor(scene, x, y) {
+  constructor(scene, x, y, type = 'health', opts = {}) {
     super(scene);
     this.x = x;
     this.y = y;
-    this.vy = -260;
-    this.vx = (Math.random() - 0.5) * 120;
+    this.type = type;
+    this.st = STYLE[type] || STYLE.health;
+    // default: a little upward pop out of a fallen enemy. `drop: true` makes a
+    // supply crate fall from the sky instead.
+    this.vy = opts.drop ? 60 : -260;
+    this.vx = opts.drop ? 0 : (Math.random() - 0.5) * 120;
     this.onGround = false;
-    this.life = 9;
+    this.life = CONFIG.CONTENT.PICKUP.LIFE;
     this.dead = false;
-    this.t = 0;
+    this.t = opts.drop ? -Math.random() : 0; // stagger flicker for multi-drops
     this.setDepth(15);
     scene.add.existing(this);
   }
@@ -33,29 +44,51 @@ export class Pickup extends Phaser.GameObjects.Graphics {
     // collect
     const dx = this.x - player.x;
     const dy = this.y - (player.y - 60);
-    if (Math.abs(dx) < 40 && Math.abs(dy) < 70) {
+    if (Math.abs(dx) < 42 && Math.abs(dy) < 74) {
       this.dead = true;
       this._collected = true;
     }
 
-    // draw
-    const bob = this.onGround ? Math.sin(this.t * 4) * 4 : 0;
+    // draw — type-specific silhouette so the player can read the drop at a glance
+    const bob = this.onGround ? Math.sin(Math.max(0, this.t) * 4) * 4 : 0;
     const blink = this.life < 3 ? (Math.sin(this.t * 16) > 0 ? 1 : 0.3) : 1;
-    this.clear();
     const g = this;
-    const R = 13;
+    g.clear();
+    const R = this.type === 'score' ? 12 : 13;
+    const s = this.st;
     // glow
-    g.fillStyle(0x35e1ff, 0.18 * blink);
+    g.fillStyle(s.glow, 0.18 * blink);
     g.fillCircle(0, bob, R + 8 + Math.sin(this.t * 5) * 2);
-    // capsule
-    g.fillStyle(0x0a1220, 0.95 * blink);
-    g.fillRoundedRect(-R, -R + bob, R * 2, R * 2, 6);
-    g.lineStyle(3, 0x35e1ff, blink);
-    g.strokeRoundedRect(-R, -R + bob, R * 2, R * 2, 6);
-    // plus
-    g.fillStyle(0xeaf4ff, blink);
-    g.fillRect(-2, -8 + bob, 4, 16);
-    g.fillRect(-8, -2 + bob, 16, 4);
+    if (this.type === 'score') {
+      // gold gem (diamond)
+      g.fillStyle(s.body, 0.95 * blink);
+      const pts = [[0, -R], [R, 0], [0, R], [-R, 0]];
+      g.fillPoints(pts.map((p) => ({ x: p[0], y: p[1] + bob })), true);
+      g.lineStyle(3, s.edge, blink);
+      g.strokePoints(pts.map((p) => ({ x: p[0], y: p[1] + bob })), true);
+      g.fillStyle(s.mark, blink);
+      g.fillCircle(0, bob, R * 0.35);
+    } else if (this.type === 'rage') {
+      // rage capsule with a lightning bolt
+      g.fillStyle(s.body, 0.95 * blink);
+      g.fillRoundedRect(-R, -R + bob, R * 2, R * 2, 6);
+      g.lineStyle(3, s.edge, blink);
+      g.strokeRoundedRect(-R, -R + bob, R * 2, R * 2, 6);
+      g.fillStyle(s.mark, blink);
+      g.beginPath();
+      g.moveTo(2, -9 + bob); g.lineTo(-5, 1 + bob); g.lineTo(-1, 1 + bob);
+      g.lineTo(-3, 9 + bob); g.lineTo(5, -2 + bob); g.lineTo(1, -2 + bob);
+      g.closePath(); g.fillPath();
+    } else {
+      // health capsule + plus
+      g.fillStyle(s.body, 0.95 * blink);
+      g.fillRoundedRect(-R, -R + bob, R * 2, R * 2, 6);
+      g.lineStyle(3, s.edge, blink);
+      g.strokeRoundedRect(-R, -R + bob, R * 2, R * 2, 6);
+      g.fillStyle(s.mark, blink);
+      g.fillRect(-2, -8 + bob, 4, 16);
+      g.fillRect(-8, -2 + bob, 16, 4);
+    }
     g.alpha = 1;
 
     if (this.dead) this._destroy();

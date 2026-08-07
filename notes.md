@@ -182,3 +182,59 @@ Boss 解决了"峰值"，但**普通波战斗仍单调**——踢全程碾压拳
 - 测试：`tests/retention.spec.js`（5 用例：内移带/墙边、vanguard 仅 wave2 首刷、FIRST BLOOD 仅一次、nextUnlock+明日、teach/goal/结算 smoke），并在 `tests/dev.config.js` 注册 `retention` project。CI `npm test`（core/mobile）不受影响。
 
 验证缺口（需你环境补跑）：`npx playwright test --config=tests/dev.config.js`（retention + 全部 dev 套件）与 `npm test`（官方 5/5）。
+
+### Round 5 — 内容多样性（敌人 / 遭遇 / 稀有事件 / 环境交互）
+
+攻"游戏重复感"。**只加内容，不改系统架构**——所有新机制都复用现有模式（变体字典、
+shockwave 数组、Pickup 实体、mods 总线、banner/slowmo 反馈原语）。本环境已补齐 Chromium
+系统库（`apt-get download` 18 个 .deb 到 `/tmp/opencode/chromelibs` + `LD_LIBRARY_PATH`），
+故全部测试首次可在本机实跑。
+
+**4 类新内容：**
+
+1. **敌人多样性**（`Enemy.js` VARIANTS + 专属 AI 分支）：
+   - **shielder**（钢蓝、55hp、持盾）：正面挡轻击（拳 kb≤400 从正面 0 伤害+clang 火花）；
+     踢（heavy kb>400）破盾 ~1.1s 惩罚窗；背刺受伤。教玩家混踢+绕侧。
+   - **bomber**（橙红、18hp、自爆）：冲到玩家近前（78px）或存活>4.5s 点燃 0.6s 引信，
+     引信期白热频闪+加速冲；死亡或引信到时 `_detonate`→`_detonateBomber`：半径 96px 爆风
+     （击退+对玩家接触伤害）+ 链式伤害其他敌人（友好火力）+ 3.2s 地面火区。引信可被击杀
+     提前引爆=clutch 连锁。`detonated` 标志保证只爆一次。
+   - **ranger**（品红、26hp、远程）：保持 KITE_RANGE 320，60px 外抛物线投掷（弹道求解
+     `spawnEnemyProjectile` 按 T=dist/520 clamp(0.55,1.3) 解 vx/vy），被贴近则 retreat。
+     纯远程；抓住=免费击杀，逼玩家主动近身。
+
+2. **环境交互**（`GameScene` 两个新数组，复用 shockwave 的 update+draw 模式）：
+   - **hazards**（地面火区）：bomber 爆炸/meteor 火印遗留，0.5s tick 对站立其中的玩家+敌人
+     造持续伤害（敌人=友好火力链）；`fireLayer`(depth18) 多层火焰绘制。
+   - **projectiles**（ranger 投掷物）：重力抛物线，落点尘爆；`projLayer`(depth20) 光球+尾迹。
+   - **meteorWarnings**（meteor 事件）：0.7s 地面圆环预警+下落岩石，命中=爆风+短暂火区。
+
+3. **遭遇/稀有事件**（新 `js/systems/Events.js`，对标 Meta.js 字典+纯函数）：
+   `rollEvent(wave)` 在非 boss 波（wave≥3）以 20% 概率选一个事件，`apply(scene)` 设标志位，
+   `spawnOne`/`update` 据此混搭当波。8 个事件：SWARM（全 runner+3）、HEAVY（brute/shielder
+   -1）、BOMB SQUAD（全 bomber）、HUNTER PACK（ranger/leaper）、ELITE DUO（前 2 个 vanguard）、
+   SUPPLY DROP（空投 gold+rage 拾取物）、METEOR STORM（波期间陨石）、RAGE MODE（免费 rage
+   ×1.6 时长）。boss 波从不事件化；wave1 仍纯 grunt、wave2 仍 vanguard 首刷（retention 约定）。
+
+4. **拾取物多样性**（`Pickup.js` 加 `type`）：health（原有青十字 +25hp）/rage（橙闪电，8s
+   ×1.6 伤害+×2 计分，HUD 加橙色 rage 条）/score（金宝石，+500×scoreMul）。空投用 `{drop:true}`
+   从天而降。非 boss 击杀 4% 概率掉 rage。
+
+**配套：**`_scoreMul()` 统一 difficulty×daily×rage 计分倍率；`_resolveCombat` rage 期放大玩家
+伤害；HUD rage 条（UIScene）；`spawned/counts`/遥测加 shielder/bomber/ranger + hazards/
+projectiles/meteors/rage/event；新增 `__test` 钩子（spawnVariant/triggerEvent/giveRage/
+dropPickup/spawnFireZone/spawnProjectileAt/detonateAt）。
+
+**回归修复：**`_physics` 加通用 `_hardSeparate`（minGap12，仅严重重叠时触发，跳过 boss 目标）
++ bomber/ranger `_sepNudge`（含 d≈0 的 id-parity 确定性分流），保证 ">8px 不完美重叠" 不变式
+（qa-regression 在 bomber/ranger 绕过 flank 槽位后曾偶发破坏）。`killFirstEnemy`/`killBoss`
+钩子末尾加 `_updateHUD()` 同步刷新遥测，修掉 FIRST BLOOD 断言的陈旧读取（原代码在本环境也失败）。
+
+**测试：**新增 `tests/variety.spec.js`（10 用例，覆盖 3 变体+火区/投掷物+rage/score 拾取+
+事件导演+meteor），注册 `variety` project。官方 CI 5/5 + 全 dev 套件（boss/depth/combo/
+difficulty/meta/onboard/qa/retention/variety/volume）全绿。playthrough 实测中 casual 触发
+supply 事件+收集 rage、mobile 触发 swarm 事件（5 runner），新内容已在真实对局出现。
+
+**趣味评估：**这轮杠杆是让每波都可能不一样——同一波可能是蜂拥/重甲/炸弹/猎人/精英/陨石/
+狂暴/空投，加上 3 种逼迫不同应对的新敌人（盾=踢、爆=拉距、射=近身），重复感显著下降。
+仍是代理指标；下轮候选=把事件/新变体接入 meta 解锁或 daily 池。

@@ -31,6 +31,26 @@ const VARIANTS = {
     palette: { limb: 0xffd23f, joint: 0xffea99, head: 0xfff5cc, accent: 0xff9b00, fist: 0xffffff },
     health: 50, speed: 132, damage: 11, scale: 1.25, score: 300, attackReach: 86,
   },
+  shielder: {
+    // riot guard: holds a frontal shield that BLOCKS light hits (punches). A kick
+    // (heavy) shatters the guard for ~1s, opening a punish window. Teaches the
+    // player to mix in kicks and to flank — pure punch-spam bounces off.
+    palette: { limb: 0x7fb8d6, joint: 0xb6dcec, head: 0xdaf2ff, accent: 0x2f8fbf, fist: 0xeaf4ff },
+    health: 55, speed: 120, damage: 12, scale: 1.15, score: 320, attackReach: 82,
+  },
+  bomber: {
+    // volatile suicide unit: rushes in, ignites a short fuse near the player, and
+    // detonates a lingering ground-fire zone. Fragile, but its blast also hurts
+    // other enemies — fun emergent chain reactions. Spacing/jumping beats it.
+    palette: { limb: 0xff9a3d, joint: 0xffc98a, head: 0xffe6c2, accent: 0xff3b30, fist: 0xffe26b },
+    health: 18, speed: 168, damage: 8, scale: 0.95, score: 240, attackReach: 70,
+  },
+  ranger: {
+    // ranged kiter: keeps its distance and lobs arcing projectiles. Forces the
+    // player to close ground instead of turtling. Retreats when rushed.
+    palette: { limb: 0xff5cb0, joint: 0xff9ecf, head: 0xffd0e6, accent: 0xd62f8a, fist: 0xffe26b },
+    health: 26, speed: 140, damage: 10, scale: 0.98, score: 280, attackReach: 80,
+  },
   boss: {
     // elite climactic enemy for boss waves (every 5th wave). Big, tough, and
     // performs a telegraphed ground-slam whose shockwaves must be jumped.
@@ -73,6 +93,15 @@ export class Enemy extends Stickman {
     this.enraged = false;
     this.slam = null;     // { phase: 'windup'|'leap'|'recover', t }
     this.slamCd = this.isBoss ? 2.0 : 0;  // first slam after a brief grace
+    // shielder guard state — down for GUARD_BREAK_TIME after a heavy hit lands
+    this.guardBroken = 0;
+    // bomber fuse state — { t } once close enough; detonates at FUSE_TIME
+    this.fuse = null;
+    this.lifeT = 0;             // seconds alive (bombers auto-detonate past a threshold)
+    this.detonated = false;     // idempotency guard so a bomber blasts exactly once
+    // ranged throw state for rangers — cooldown + windup timer
+    this.throwCd = rand(1.0, 2.0);
+    this.throw = null;     // { phase: 'windup'|'recover', t, windup }
   }
 
   bodyBox() {
@@ -82,10 +111,33 @@ export class Enemy extends Stickman {
 
   takeHit(dmg, fromX, kb, pause) {
     if (this.dead) return false;
+    const heavy = kb > 400; // kick (heavy) is the universal interrupt — skill reward
+
+    // SHIELDER GUARD: a raised frontal shield nullifies light hits from the
+    // front. The player must either kick (heavy shatters the guard for ~1s) or
+    // flank. A guard that's already broken, or a hit from behind, connects.
+    if (this.variant === 'shielder' && this.guardBroken <= 0 && !heavy) {
+      const frontal = sign(fromX - this.x) === this.facing;
+      if (frontal) {
+        // blocked: no damage, a clang spark + tiny chip shove. The shove keeps
+        // the enemy reachable so the player can't pin it out of range.
+        this.flashTime = 0.10;
+        const dir = sign(this.x - fromX) || 1;
+        this.vx = dir * CONFIG.CONTENT.SHIELDER.GUARD_SHOVE;
+        if (this.scene.audio) this.scene.audio.hit();
+        if (this.scene._blockSpark) this.scene._blockSpark(this.x + this.facing * 30, this.y - 70 * this.scale);
+        return true;
+      }
+    }
+    // a landed heavy hit on a shielder breaks its guard for a punish window.
+    if (this.variant === 'shielder' && heavy) {
+      this.guardBroken = CONFIG.CONTENT.SHIELDER.GUARD_BREAK_TIME;
+    }
+    this.guardBroken = Math.max(0, this.guardBroken); // (decremented in update)
+
     this.health -= dmg;
     this.flashTime = 0.12;
     const dir = sign(this.x - fromX) || 1;
-    const heavy = kb > 400; // kick (heavy) is the universal interrupt — skill reward
     // a kill always applies, regardless of armor
     if (this.health <= 0) { this._die(dir); return true; }
 
@@ -132,6 +184,66 @@ export class Enemy extends Stickman {
     this.vy = -360;
     this.active = false;
     this.scene.audio && this.scene.audio.enemyDie();
+    // BOMBER: death always goes out with a blast (a confident kill is a clutch
+    // chain-reaction play). _detonate is idempotent, so a fuse-completion death
+    // won't double-fire.
+    if (this.variant === 'bomber') this._detonate();
+  }
+
+  // ---- bomber detonation ----
+  _detonate() {
+    if (this.detonated) return;
+    this.detonated = true;
+    if (this.scene._detonateBomber) this.scene._detonateBomber(this);
+  }
+
+  _progressFuse(dt, player) {
+    const B = CONFIG.CONTENT.BOMBER;
+    const a = this.fuse;
+    a.t += dt;
+    // committed dive toward the player while the fuse burns
+    const dir = sign(player.x - this.x) || this.facing;
+    this.facing = dir;
+    this.vx += (dir * this.v.speed * 1.15 * this.speedMul - this.vx) * clamp01(8 * dt);
+    // core ramps to white-hot + strobes so the player reads the imminent blast
+    this.glow = clamp01(a.t / B.FUSE_TIME);
+    if (Math.floor(a.t * 22) % 2 === 0) this.flashTime = Math.max(this.flashTime, 0.06);
+    if (a.t >= B.FUSE_TIME) {
+      this._detonate();
+      if (!this.dead) { this.health = 0; this._die(dir); }
+    }
+  }
+
+  // ---- ranger ranged throw ----
+  _startThrow() {
+    const R = CONFIG.CONTENT.RANGER;
+    this.throw = { phase: 'windup', t: 0, windup: R.THROW_WINDUP };
+    this.state = 'punch'; // reuse the punch pose for the throwing windup
+  }
+
+  _progressThrow(dt, player) {
+    const a = this.throw;
+    a.t += dt;
+    this.facing = sign(player.x - this.x) || this.facing;
+    if (a.phase === 'windup') {
+      this.glow = clamp01(a.t / a.windup) * 0.9;
+      this.vx *= clamp01(1 - 8 * dt); // plant feet while aiming
+      if (a.t >= a.windup) {
+        this.glow = 1;
+        if (this.scene.spawnEnemyProjectile) {
+          this.scene.spawnEnemyProjectile(this.x, this.y - 92, player.x, player.y - 60);
+        }
+        a.phase = 'recover'; a.t = 0;
+      }
+    } else {
+      this.glow = 0;
+      this.vx *= clamp01(1 - 10 * dt);
+      if (a.t >= 0.5) {
+        this.throw = null;
+        this.throwCd = rand(CONFIG.CONTENT.RANGER.THROW_CD[0], CONFIG.CONTENT.RANGER.THROW_CD[1]);
+        this.state = this.onGround ? 'idle' : 'jump';
+      }
+    }
   }
 
   getHitbox(player) {
@@ -175,6 +287,26 @@ export class Enemy extends Stickman {
       return;
     }
 
+    // BOMBER fuse: once lit (started in AI below), it runs to completion and
+    // detonates — takes priority over a normal melee swing, like the boss slam.
+    if (this.fuse) {
+      this._progressFuse(dt, player);
+      this._physics(dt);
+      this._render();
+      return;
+    }
+
+    // RANGER throw windup: a committed lob. Takes priority once started.
+    if (this.throw) {
+      this._progressThrow(dt, player);
+      this._physics(dt);
+      this._render();
+      return;
+    }
+
+    // shielder guard recovers over time after being broken.
+    if (this.guardBroken > 0) this.guardBroken -= dt;
+
     if (this.attack) {
       this._progressAttack(dt);
       this._physics(dt);
@@ -213,6 +345,56 @@ export class Enemy extends Stickman {
         this._render();
         return;
       }
+    }
+
+    // BOMBER: no melee — it charges the player, ignites a short fuse when close
+    // (or after a few seconds alive, so a kiting player still gets a blast),
+    // then detonates a lingering ground-fire zone on death or fuse completion.
+    if (this.variant === 'bomber') {
+      const B = CONFIG.CONTENT.BOMBER;
+      this.lifeT += dt;
+      if (this.onGround && !this.fuse && (dist < B.FUSE_RANGE || this.lifeT > 4.5)) {
+        this.fuse = { t: 0 };
+        this.glow = 0.5;
+      }
+      // keep charging at the player even while the fuse burns (committed dive).
+      // A light separation term keeps bombers from stacking on the same pixel
+      // (they ignore flank slots, unlike the melee pack); aiming at a small
+      // per-bomber flank offset also spreads two bombers on opposite sides.
+      const dir = sign(dx) || this.facing;
+      const charging = !!this.fuse;
+      const sp = this.v.speed * this.speedMul * (charging ? 1.15 : 1.0);
+      const target = dir * sp + this._sepNudge() * 7;
+      this.vx += (target - this.vx) * clamp01(8 * dt);
+      this.state = this.onGround ? 'run' : 'jump';
+      this._physics(dt);
+      this._render();
+      return;
+    }
+
+    // RANGER: kites — maintains distance, lobs arcing projectiles, and retreats
+    // when rushed. Purely ranged; the punish for catching one is a free kill.
+    if (this.variant === 'ranger') {
+      const R = CONFIG.CONTENT.RANGER;
+      this.throwCd -= dt;
+      let mdir;
+      if (dist < R.KITE_RANGE * 0.8) mdir = (-sign(dx)) || (-this.facing); // retreat
+      else if (dist > R.THROW_RANGE) mdir = sign(dx) || this.facing;        // close in
+      else mdir = 0;                                                        // hold + throw
+      const sep = this._sepNudge() * 4;
+      if (mdir !== 0) {
+        this.vx += (mdir * this.v.speed * this.speedMul + sep - this.vx) * clamp01(8 * dt);
+        this.state = this.onGround ? 'run' : 'jump';
+      } else {
+        this.vx += (sep - this.vx) * clamp01(6 * dt);
+        this.state = this.onGround ? 'idle' : 'jump';
+      }
+      if (this.onGround && !this.throw && this.throwCd <= 0 && dist <= R.THROW_RANGE && dist >= 50) {
+        this._startThrow();
+      }
+      this._physics(dt);
+      this._render();
+      return;
     }
 
     if (dist > commitRange || standoff > 30) {
@@ -358,6 +540,43 @@ export class Enemy extends Stickman {
     if (this.scene._bossEnrage) this.scene._bossEnrage(this);
   }
 
+  // minimal horizontal separation for archetypes that ignore flank slots
+  // (bombers charge, rangers kite) — pushes them off neighbors so they don't
+  // stack on the same X. Melee pack uses flank slots instead, per the design.
+  // Returns a signed velocity nudge; two perfectly overlapping enemies (d≈0)
+  // deterministically split by id parity so they don't stay glued.
+  _sepNudge() {
+    let nudge = 0;
+    for (const o of this.scene.enemies) {
+      if (o === this || o.dead) continue;
+      const d = this.x - o.x;
+      const ad = Math.abs(d);
+      if (ad < 1) nudge += (this.id % 2 === 0 ? 1 : -1) * 40;
+      else if (ad < 44) nudge += (d / ad) * (44 - ad) * 0.7;
+    }
+    return nudge;
+  }
+
+  // hard position-based safety net: guarantees a minimum horizontal gap from
+  // other living enemies. Acts only on severe overlap (<minGap), which the tuned
+  // flank spacing keeps melee out of in practice — it's a collision resolver for
+  // the bomber/ranger archetypes (which bypass flank slots) + spawn coincidences,
+  // NOT boids steering. Ensures the "no perfect overlap" invariant.
+  _hardSeparate(minGap = 12) {
+    if (this.dead) return;
+    for (const o of this.scene.enemies) {
+      if (o === this || o.dead || o.isBoss) continue;
+      const d = this.x - o.x;
+      const ad = Math.abs(d);
+      if (ad < minGap) {
+        const dir = ad < 0.5 ? (this.id % 2 ? 1 : -1) : Math.sign(d) || 1;
+        this.x += dir * (minGap - ad + 1);
+      }
+    }
+    if (this.x < CONFIG.WALL_LEFT) this.x = CONFIG.WALL_LEFT;
+    if (this.x > CONFIG.WALL_RIGHT) this.x = CONFIG.WALL_RIGHT;
+  }
+
   _physics(dt) {
     this.vy += CONFIG.GRAVITY * dt;
     this.x += this.vx * dt;
@@ -375,6 +594,8 @@ export class Enemy extends Stickman {
     if (this.onGround && (this.state === 'idle' || this.state === 'punch' || this.state === 'hurt')) {
       this.vx *= clamp01(1 - 8 * dt);
     }
+    // resolve severe horizontal overlap with other living enemies (safety net)
+    this._hardSeparate();
   }
 
   _render() {
@@ -392,6 +613,9 @@ export class Enemy extends Stickman {
       anim = { state: 'jump', vy: -this.vy };
     } else if (this.attack) {
       anim = { state: 'punch', phase: this._attackPhase01() };
+    } else if (this.throw) {
+      // ranger throwing windup reads as a committed punch pose
+      anim = { state: 'punch', phase: this.throw.phase === 'windup' ? 0.35 : 0.85 };
     } else if (this.state === 'hurt') {
       anim = { state: 'hurt', time: this.hurtTime };
     } else if (this.state === 'run') {
@@ -400,6 +624,34 @@ export class Enemy extends Stickman {
       anim = { state: 'idle', time: this.animTime };
     }
     this.render(anim);
+    // equipment overlays — make new archetypes visually distinct so the player
+    // reads the shield / volatile core at a glance. Drawn in graphics coords
+    // (feet at origin, +x right, facing applied manually since Graphics isn't rotated).
+    if (!this.dead) {
+      if (this.variant === 'shielder') {
+        const up = this.guardBroken <= 0;
+        const sx = this.facing * 30 * this.scale;
+        const sy = -68 * this.scale;
+        const sw = 14 * this.scale, sh = 60 * this.scale;
+        this.fillStyle(0x2f8fbf, up ? 0.92 : 0.35);
+        this.fillRect(sx - sw / 2, sy - sh / 2, sw, sh);
+        this.lineStyle(3, up ? 0xeaf4ff : 0xff6f5c, up ? 1 : 0.6);
+        this.strokeRect(sx - sw / 2, sy - sh / 2, sw, sh);
+        this.fillStyle(0xeaf4ff, up ? 0.9 : 0.3);
+        this.fillCircle(sx, sy, 4 * this.scale);
+      } else if (this.variant === 'bomber') {
+        // volatile core: gentle pulse normally, white-hot strobe while fusing
+        const cy = -62 * this.scale;
+        const rad = (8 + (this.fuse ? 4 : 0)) * this.scale;
+        const pulse = this.fuse
+          ? (0.55 + 0.45 * Math.abs(Math.sin(this.animTime * 26)))
+          : (0.45 + 0.2 * Math.sin(this.animTime * 6));
+        this.fillStyle(this.fuse ? 0xffffff : 0xff3b30, pulse * 0.85);
+        this.fillCircle(this.facing * 4, cy, rad);
+        this.lineStyle(2, 0xffe26b, pulse);
+        this.strokeCircle(this.facing * 4, cy, rad);
+      }
+    }
     // hit flash overlay — a soft white disc + thin ring over the torso so the
     // player reads that the strike landed (the lineStyle was previously set but
     // never stroked, so the ring was missing entirely).

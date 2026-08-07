@@ -5,6 +5,7 @@ import { Pickup } from '../entities/Pickup.js';
 import { drawBackground } from '../utils/background.js';
 import { aabb, clamp, clamp01, sign, rand, randInt } from '../utils/math.js';
 import { Meta } from '../systems/Meta.js';
+import { rollEvent, getEvent } from '../systems/Events.js';
 
 export class GameScene extends Phaser.Scene {
   constructor() { super('Game'); }
@@ -17,9 +18,14 @@ export class GameScene extends Phaser.Scene {
     this.shadows = this.add.graphics().setDepth(5);
     this.fxLayer = this.add.graphics().setDepth(20); // hit sparks drawn directly
     this.shockLayer = this.add.graphics().setDepth(19); // boss ground-slam shockwaves
+    this.fireLayer = this.add.graphics().setDepth(18); // ground fire (bomber/meteor)
+    this.projLayer = this.add.graphics().setDepth(20); // ranger projectiles + meteor markers
     this.enemies = [];
     this.pickups = [];
     this.shockwaves = [];
+    this.hazards = [];        // ground fire zones { x, w, life, t, tick, dps }
+    this.projectiles = [];    // ranger lobbed projectiles
+    this.meteorWarnings = []; // telegraph markers before a meteor impact
     this.boss = null;            // live boss reference (for the HP bar + payoff)
     this.isBossWave = false;     // every 5th wave is a single-boss encounter
     this.score = 0;
@@ -37,11 +43,16 @@ export class GameScene extends Phaser.Scene {
     this.hitsTaken = 0;
     this.healed = 0;
     this.kills = 0;
-    this.spawned = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0 };
+    this.spawned = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0, shielder: 0, bomber: 0, ranger: 0 };
     this.tierBonuses = 0;
     this.firstBloodDone = false;     // FIRST BLOOD fires once on the run's first non-boss kill
     this.waveFirstSpawn = true;      // wave-2 first spawn is a vanguard mini-elite
     this.onboard = { move: false, jump: false, punch: false, kick: false, firstHit: false, t: 0 };
+    // round-5 content: rage buff + rare-event director state
+    this.rageT = 0;
+    this.rageMax = 1;
+    this.activeEvent = null;     // event key for the current wave (null = plain wave)
+    this._resetEventFlags();
 
     // difficulty preset (chosen on the title screen; persists)
     const diffKey = this.registry.get('difficulty') || 'normal';
@@ -94,7 +105,7 @@ export class GameScene extends Phaser.Scene {
         despawnEnemies: () => { for (const e of this.enemies) if (!e.dead) { e.dead = true; e.destroy(); } },
         // skip straight to a boss wave (default wave 5) so boss logic can be
         // exercised without playing through 4 normal waves.
-        gotoBossWave: (n) => { for (const e of this.enemies) e.destroy(); this.enemies = []; this.boss = null; this.shockwaves = []; this.startWave(n || CONFIG.BOSS.WAVE_EVERY); },
+        gotoBossWave: (n) => { for (const e of this.enemies) e.destroy(); this.enemies = []; this.boss = null; this.shockwaves = []; this.hazards = []; this.projectiles = []; this.meteorWarnings = []; this.startWave(n || CONFIG.BOSS.WAVE_EVERY); },
         spawnBoss: () => { this._spawnBoss(); },
         setBossHp: (n) => { if (this.boss && !this.boss.dead) { this.boss.health = n; } },
         // route a lethal player strike through the real combat pipeline so the
@@ -104,6 +115,7 @@ export class GameScene extends Phaser.Scene {
           const hb = { dmg: 9999, kb: 560, pause: 0.18, from: this.player.x };
           b.takeHit(9999, this.player.x, 560, 0.18);
           if (b.dead) this._onPlayerHit(b, hb, true);
+          this._updateHUD(); // refresh telemetry synchronously so tests read post-kill state
         },
         // route a lethal player strike on the first living non-boss enemy through
         // the real combat pipeline so FIRST BLOOD (and normal K.O. feedback) fires
@@ -114,6 +126,7 @@ export class GameScene extends Phaser.Scene {
           const hb = { dmg: 9999, kb: 320, pause: 0.055, from: this.player.x };
           e.takeHit(9999, this.player.x, 320, 0.055);
           if (e.dead) this._onPlayerHit(e, hb, true);
+          this._updateHUD(); // refresh telemetry synchronously (FIRST BLOOD flag etc.)
           return true;
         },
         // combat-depth probes: read first living enemy's HP, spawn a grunt at a
@@ -127,6 +140,30 @@ export class GameScene extends Phaser.Scene {
           this.enemies.push(e);
           return e.health;
         },
+        // spawn a specific variant at an offset from the player (round-5 content)
+        spawnVariant: (variant, dx) => {
+          const e = new Enemy(this, this.player.x + (dx || 80), CONFIG.GROUND_Y, variant);
+          e.facing = -1; e.flankDir = 1;
+          this._applyScaling(e, Math.max(1, this.wave));
+          this.enemies.push(e);
+          return e;
+        },
+        // force a rare event to remix the next/current wave (tests)
+        triggerEvent: (key, wave) => {
+          const ev = getEvent(key);
+          if (!ev) return false;
+          this._resetEventFlags();
+          this.activeEvent = key;
+          const w = wave || Math.max(this.wave, ev.minWave);
+          this.wave = w; this.isBossWave = false; this.waveActive = true;
+          ev.apply(this);
+          return true;
+        },
+        giveRage: (t) => this._startRage(t || CONFIG.CONTENT.PICKUP.RAGE_TIME),
+        dropPickup: (type, x) => this.pickups.push(new Pickup(this, x || this.player.x, this.player.y - 60, type || 'health')),
+        spawnFireZone: (x, opts) => this.spawnFireZone(x, opts),
+        spawnProjectileAt: (x0, y0, x1, y1) => this.spawnEnemyProjectile(x0, y0, x1, y1),
+        detonateAt: (x) => this._detonateBomber({ x, y: CONFIG.GROUND_Y }),
         playerState: () => ({
           state: this.player.state,
           attackType: this.player.attack ? this.player.attack.type : null,
@@ -135,7 +172,7 @@ export class GameScene extends Phaser.Scene {
           total: this.player.attack ? this.player.attack.total : null,
           connected: this.player.attack ? this.player.attack.connected : null,
         }),
-        clearEnemies: () => { for (const e of this.enemies) if (!e.dead) { e.dead = true; e.destroy(); } this.enemies = []; this.boss = null; this.shockwaves = []; this.spawnQueue = 0; this.waveActive = false; },
+        clearEnemies: () => { for (const e of this.enemies) if (!e.dead) { e.dead = true; e.destroy(); } this.enemies = []; this.boss = null; this.shockwaves = []; this.hazards = []; this.projectiles = []; this.meteorWarnings = []; this.spawnQueue = 0; this.waveActive = false; },
       };
     }
 
@@ -212,20 +249,46 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ---- waves ----
+  // per-wave event flags consumed by spawnOne() / update(). Reset every wave so
+  // an event never bleeds into the next one.
+  _resetEventFlags() {
+    this.eventForceVariant = null; // a single forced variant for the whole wave
+    this.eventVariantPool = null;  // weighted pool to draw from each spawn
+    this.eventExtraSpawns = 0;     // +/- to this wave's spawn count
+    this.eventEliteCount = 0;      // first N spawns are vanguards
+    this.eventSupplyDrop = false;  // drop a care package at wave start
+    this.eventMeteors = false;     // spawn meteor strikes during the wave
+    this.meteorTimer = 0;
+  }
+
   startWave(n) {
     this.wave = n;
     this.waveActive = true;
     this.isBossWave = (n % CONFIG.BOSS.WAVE_EVERY === 0);
+    this._resetEventFlags();
+    this.activeEvent = null;
     if (this.isBossWave) {
-      // boss wave: a single climactic elite — no filler spawns.
+      // boss wave: a single climactic elite — no filler spawns, no event remix.
       this.spawnQueue = 1;
       this.ui.banner('BOSS WAVE ' + n, '#ff3b30');
       this.cameras.main.shake(220, 0.012);
     } else {
+      // rare-event director: occasionally remix this wave for variety. Rolled
+      // once here; the chosen event sets flags that spawnOne()/update() honor.
+      const evKey = rollEvent(n);
+      if (evKey) {
+        const ev = getEvent(evKey);
+        this.activeEvent = evKey;
+        ev.apply(this);
+        this.ui.banner(ev.name, ev.color);
+        this.ui.floatText(ev.desc, this.player.x, this.player.y - 220, ev.color, 22);
+        this.cameras.main.shake(150, 0.01);
+      }
       const extra = (this.mods && this.mods.extraPerWave) || 0;
-      const count = Math.min(2 + Math.floor(n * 0.9) + extra, 9);
+      const base = 2 + Math.floor(n * 0.9) + extra + (this.eventExtraSpawns || 0);
+      const count = Math.min(Math.max(1, base), 9);
       this.spawnQueue = count;
-      this.ui.banner('WAVE ' + n, n === 1 ? '#35e1ff' : '#ffd23f');
+      if (!this.activeEvent) this.ui.banner('WAVE ' + n, n === 1 ? '#35e1ff' : '#ffd23f');
     }
     this.spawnTimer = (n === 1) ? CONFIG.RETENTION.WAVE1_FIRST_SPAWN : 0.3;
     this.waveFirstSpawn = true;
@@ -237,14 +300,31 @@ export class GameScene extends Phaser.Scene {
     const n = this.wave;
     let variant = 'grunt';
     // RETENTION: wave 2 opens with a vanguard mini-elite — one early "duel"
-    // climax inside the first minute. Only the first spawn of that wave.
-    if (this.waveFirstSpawn && n === CONFIG.RETENTION.VANGUARD_WAVE) {
+    // climax inside the first minute. Skipped when an event remixes the wave.
+    if (this.waveFirstSpawn && n === CONFIG.RETENTION.VANGUARD_WAVE && !this.activeEvent) {
       variant = 'vanguard';
+    } else if (this.eventEliteCount > 0) {
+      // ELITE DUO event: the first N spawns of the wave are vanguards.
+      variant = 'vanguard';
+      this.eventEliteCount--;
+    } else if (this.eventForceVariant) {
+      variant = this.eventForceVariant;
+    } else if (this.eventVariantPool && this.eventVariantPool.length) {
+      variant = this.eventVariantPool[Math.floor(Math.random() * this.eventVariantPool.length)];
     } else {
-      const r = Math.random();
-      if (n >= 4 && r < 0.18) variant = 'leaper';
-      else if (n >= 3 && r < 0.40) variant = 'brute';
-      else if (n >= 2 && r < 0.62) variant = 'runner';
+      // weighted composition that scales with wave — early waves stay gentle
+      // (wave 1 is grunts only), new archetypes phase in from wave 4-6 so the
+      // first minute's teaching beats stay uncontested.
+      const table = [];
+      if (n >= 6) table.push(['ranger', 10]);
+      if (n >= 5) table.push(['shielder', 12]);
+      if (n >= 4) table.push(['bomber', 14], ['leaper', 12]);
+      if (n >= 3) table.push(['brute', 18]);
+      if (n >= 2) table.push(['runner', 22]);
+      table.push(['grunt', 30]);
+      let total = 0; for (const [, w] of table) total += w;
+      let r = Math.random() * total;
+      for (const [key, w] of table) { if ((r -= w) <= 0) { variant = key; break; } }
     }
     this.waveFirstSpawn = false;
     const fromLeft = Math.random() < 0.5;
@@ -363,6 +443,211 @@ export class GameScene extends Phaser.Scene {
     this.shockwaves = this.shockwaves.filter((s) => !s.dead);
   }
 
+  // ---- ground-fire hazard layer (bomber blasts + meteor scorch) ----
+  spawnFireZone(x, opts = {}) {
+    this.hazards.push({
+      x, w: (opts.radius || 60) * 2,
+      life: opts.life || 3, t: Math.random() * 2,
+      tick: 0, dps: opts.dps != null ? opts.dps : 24, dead: false,
+    });
+  }
+
+  _updateHazards(dt) {
+    const g = this.fireLayer;
+    g.clear();
+    const p = this.player;
+    const H = CONFIG.CONTENT.HAZARD;
+    for (const hz of this.hazards) {
+      if (hz.dead) continue;
+      hz.t += dt;
+      hz.life -= dt;
+      if (hz.life <= 0) { hz.dead = true; continue; }
+      // damage player standing in the zone (feet near the ground)
+      hz.tick -= dt;
+      const feetClear = CONFIG.GROUND_Y - p.y;
+      if (hz.tick <= 0) {
+        hz.tick = H.TICK;
+        if (hz.dps > 0 && !p.dead && p.invuln <= 0 && feetClear < 30 && Math.abs(p.x - hz.x) < hz.w / 2) {
+          const dmg = Math.max(1, Math.round(hz.dps * H.TICK * this.mods.enemyDmg));
+          if (p.takeHit(dmg, hz.x, CONFIG.ENEMY.KNOCKBACK)) this._onPlayerHurt(null, { from: hz.x });
+        }
+      }
+      // damage enemies standing in the fire (emergent friendly-fire chains)
+      if (hz.dps > 0) {
+        for (const e of this.enemies) {
+          if (e.dead || e.isBoss) continue;
+          if (Math.abs(e.x - hz.x) < hz.w / 2) e.takeHit(hz.dps * dt, hz.x, 0, 0);
+        }
+      }
+      // draw flame — layered flickering tongues, fading as it dies out
+      const fade = clamp01(hz.life / 0.6);
+      const cx = hz.x, gy = CONFIG.GROUND_Y;
+      g.fillStyle(0xff7a00, 0.22 * fade);
+      g.fillEllipse(cx, gy + 2, hz.w * 1.25, 14);
+      const tongues = 5;
+      for (let i = 0; i < tongues; i++) {
+        const frac = i / (tongues - 1);
+        const baseX = cx + (frac - 0.5) * hz.w;
+        const fh = 26 + Math.sin(hz.t * 11 + i * 1.7) * 12 + Math.cos(hz.t * 7 + i) * 6;
+        g.fillStyle(i % 2 ? 0xffd23f : 0xff9a3d, 0.55 * fade);
+        g.fillTriangle(baseX - 7, gy, baseX + 7, gy, baseX + Math.sin(hz.t * 9 + i) * 4, gy - Math.max(8, fh));
+      }
+      g.fillStyle(0xff3b30, 0.6 * fade);
+      g.fillEllipse(cx, gy, hz.w * 0.7, 10);
+    }
+    this.hazards = this.hazards.filter((h) => !h.dead);
+  }
+
+  // ---- ranger projectiles (lobbed, gravity-driven) ----
+  spawnEnemyProjectile(x0, y0, x1, y1) {
+    const R = CONFIG.CONTENT.RANGER;
+    const g = CONFIG.GRAVITY;
+    const dx = x1 - x0;
+    const dist = Math.abs(dx);
+    // pick a flight time from distance, then solve the ballistic arc toward the
+    // target — gives a readable lob instead of a flat shot.
+    const T = clamp(dist / 520, 0.55, 1.3);
+    const vx = dx / T;
+    const vy = (y1 - y0 - 0.5 * g * T * T) / T;
+    this.projectiles.push({
+      x: x0, y: y0, vx, vy, t: 0, life: R.PROJECTILE_LIFE, hit: false, dead: false,
+      dmg: Math.round(R.PROJECTILE_DMG * this.mods.enemyDmg),
+    });
+  }
+
+  _updateProjectiles(dt) {
+    const g = this.projLayer;
+    g.clear();
+    const p = this.player;
+    const R = CONFIG.CONTENT.RANGER;
+    for (const pr of this.projectiles) {
+      if (pr.dead) continue;
+      pr.t += dt; pr.life -= dt;
+      pr.vy += CONFIG.GRAVITY * dt;
+      pr.x += pr.vx * dt;
+      pr.y += pr.vy * dt;
+      if (pr.life <= 0 || pr.x < CONFIG.WALL_LEFT - 20 || pr.x > CONFIG.WALL_RIGHT + 20) { pr.dead = true; continue; }
+      if (pr.y >= CONFIG.GROUND_Y) { this.dustBurst(pr.x, CONFIG.GROUND_Y, 6); pr.dead = true; continue; }
+      if (!p.dead && p.invuln <= 0 && !pr.hit) {
+        const dx = pr.x - p.x, dy = pr.y - (p.y - 60);
+        if (Math.abs(dx) < 26 + R.PROJECTILE_RADIUS && Math.abs(dy) < 72) {
+          pr.hit = true; pr.dead = true;
+          if (p.takeHit(pr.dmg, pr.x, CONFIG.ENEMY.KNOCKBACK)) this._onPlayerHurt(null, { from: pr.x });
+          this.burst(pr.x, pr.y, 0xff5cb0, 14);
+          continue;
+        }
+      }
+      // glowing orb + soft trail
+      g.fillStyle(0xff5cb0, 0.28);
+      g.fillCircle(pr.x - pr.vx * 0.02, pr.y - pr.vy * 0.02, R.PROJECTILE_RADIUS + 4);
+      g.fillStyle(0xffe26b, 0.95);
+      g.fillCircle(pr.x, pr.y, R.PROJECTILE_RADIUS);
+      g.fillStyle(0xffffff, 0.9);
+      g.fillCircle(pr.x, pr.y, R.PROJECTILE_RADIUS * 0.5);
+    }
+    this.projectiles = this.projectiles.filter((pr) => !pr.dead);
+  }
+
+  // ---- bomber detonation (called from Enemy._detonate) ----
+  _detonateBomber(b) {
+    const B = CONFIG.CONTENT.BOMBER;
+    const x = b.x, y = b.y;
+    const p = this.player;
+    // blast: contact damage + knockback if the player is in radius
+    if (!p.dead && p.invuln <= 0 && Math.abs(p.x - x) < B.BLAST_RADIUS) {
+      const dmg = Math.round(B.FIRE_DMG_PLAYER * this.mods.enemyDmg);
+      if (p.takeHit(dmg, x, B.BLAST_KNOCKBACK)) this._onPlayerHurt(null, { from: x });
+    }
+    // chain-damage other enemies in the radius — a baited bomber thins the pack
+    for (const e of this.enemies) {
+      if (e === b || e.dead) continue;
+      if (Math.abs(e.x - x) < B.BLAST_RADIUS) e.takeHit(26, x, B.BLAST_KNOCKBACK * 0.7, 0.04);
+    }
+    // lingering ground fire
+    this.spawnFireZone(x, { life: B.FIRE_LIFE, radius: B.FIRE_RADIUS, dps: B.FIRE_DPS });
+    this.burst(x, y - 60, 0xff7a00, 42);
+    this.burst(x, y - 60, 0xffd23f, 24);
+    this.dustBurst(x, CONFIG.GROUND_Y, 18);
+    this.cameras.main.shake(190, 0.022);
+    this.audio && this.audio.bigHit();
+  }
+
+  // shield "clang" feedback when a light hit is blocked
+  _blockSpark(x, y) {
+    this._spark(x, y, '#35e1ff');
+    this.burst(x, y, 0x35e1ff, 8);
+  }
+
+  // ---- meteor storm event ----
+  _updateMeteors(dt) {
+    const M = CONFIG.CONTENT.METEOR;
+    if (this.eventMeteors && this.waveActive) {
+      this.meteorTimer -= dt;
+      if (this.meteorTimer <= 0) {
+        const x = rand(CONFIG.WALL_LEFT + 40, CONFIG.WALL_RIGHT - 40);
+        this.meteorWarnings.push({ x, t: 0, warn: M.WARN_TIME, dead: false });
+        this.meteorTimer = rand(M.INTERVAL[0], M.INTERVAL[1]);
+        this.audio && this.audio.kick();
+      }
+    }
+    const g = this.projLayer; // share the projectile layer for markers + descending rock
+    for (const w of this.meteorWarnings) {
+      if (w.dead) continue;
+      w.t += dt;
+      if (w.t >= w.warn) {
+        // impact
+        const p = this.player;
+        if (!p.dead && p.invuln <= 0 && Math.abs(p.x - w.x) < M.RADIUS) {
+          const dmg = Math.round(M.DAMAGE * this.mods.enemyDmg);
+          if (p.takeHit(dmg, w.x, M.KNOCKBACK)) this._onPlayerHurt(null, { from: w.x });
+        }
+        // scorch the ground briefly
+        this.spawnFireZone(w.x, { life: 1.8, radius: M.RADIUS * 0.75, dps: 18 });
+        this.burst(w.x, CONFIG.GROUND_Y - 20, 0xff7a00, 32);
+        this.dustBurst(w.x, CONFIG.GROUND_Y, 18);
+        this.cameras.main.shake(140, 0.014);
+        this.audio && this.audio.bigHit();
+        w.dead = true;
+      } else {
+        // telegraph: a ground ring filling up + a descending rock
+        const a = clamp01(w.t / w.warn);
+        g.lineStyle(3, 0xff3b30, 0.35 + 0.55 * a);
+        g.strokeEllipse(w.x, CONFIG.GROUND_Y + 4, M.RADIUS * 1.7, 24);
+        g.fillStyle(0xff3b30, 0.14 * a);
+        g.fillEllipse(w.x, CONFIG.GROUND_Y + 4, M.RADIUS * 1.7, 24);
+        g.fillStyle(0xffd23f, 1);
+        const rockY = CONFIG.GROUND_Y - 560 * (1 - a);
+        g.fillCircle(w.x, rockY, 9);
+        g.fillStyle(0xff7a00, 0.5);
+        g.fillCircle(w.x, rockY + 14, 7);
+      }
+    }
+    this.meteorWarnings = this.meteorWarnings.filter((w) => !w.dead);
+  }
+
+  // ---- rage buff (rage pickup / RAGE MODE event) ----
+  _startRage(time) {
+    this.rageT = time;
+    this.rageMax = time;
+    this.cameras.main.shake(100, 0.01);
+    this.audio && this.audio.combo(12);
+  }
+
+  // combined score multiplier: difficulty/daily * rage buff
+  _scoreMul() {
+    const base = (this.mods && this.mods.scoreMul) || 1;
+    return this.rageT > 0 ? base * CONFIG.CONTENT.PICKUP.RAGE_SCORE_MUL : base;
+  }
+
+  // ---- supply drop event ----
+  _dropSupply() {
+    const cx = clamp(this.player.x + rand(-140, 140), CONFIG.WALL_LEFT + 60, CONFIG.WALL_RIGHT - 60);
+    const gold = new Pickup(this, cx - 44, 90, 'score', { drop: true });
+    const rage = new Pickup(this, cx + 44, 90, 'rage', { drop: true });
+    this.pickups.push(gold, rage);
+    this.ui.floatText('SUPPLY!', cx, 160, '#35e1ff', 26);
+  }
+
   // ---- combat ----
   _resolveCombat() {
     const p = this.player;
@@ -370,18 +655,23 @@ export class GameScene extends Phaser.Scene {
     // player -> enemies
     const phb = p.getHitbox();
     if (phb) {
+      // RAGE: a active rage buff amplifies the player's outgoing damage. Compose
+      // an effective hitbox so the kill-prediction + takeHit both see the boost.
+      const rageMul = this.rageT > 0 ? CONFIG.CONTENT.PICKUP.RAGE_DMG_MUL : 1;
+      const dmg = Math.round(phb.dmg * rageMul);
+      const eff = (rageMul === 1) ? phb : { x: phb.x, y: phb.y, w: phb.w, h: phb.h, swing: phb.swing, dmg, kb: phb.kb, pause: phb.pause, from: phb.from };
       for (const e of this.enemies) {
         if (e.dead || e.lastSwing === p.swingId) continue;
-        if (aabb(phb, e.bodyBox())) {
+        if (aabb(eff, e.bodyBox())) {
           e.lastSwing = p.swingId;
           // record the connection so the player's whiff-penalty logic knows this
           // swing landed (a missed kick recovers slower than a connecting one).
           if (p.attack) p.attack.connected = true;
           // decide kill from pre-hit health so the death anim/K.O. feedback lines
           // up with takeHit's own <=0 check.
-          const killed = e.health - phb.dmg <= 0;
-          e.takeHit(phb.dmg, phb.from, phb.kb, phb.pause);
-          this._onPlayerHit(e, phb, killed);
+          const killed = e.health - eff.dmg <= 0;
+          e.takeHit(eff.dmg, eff.from, eff.kb, eff.pause);
+          this._onPlayerHit(e, eff, killed);
         }
       }
     }
@@ -410,7 +700,8 @@ export class GameScene extends Phaser.Scene {
     // callouts (hide the pre-contact pointer once they've actually landed a hit).
     if (!this.onboard.firstHit) this.onboard.firstHit = true;
     const mult = 1 + Math.floor((this.combo - 1) / 4) * 0.5;
-    const gain = Math.round(10 * mult * this.mods.scoreMul);
+    const scoreMul = this._scoreMul();
+    const gain = Math.round(10 * mult * scoreMul);
     this.score += gain;
     this.burst(enemy.x, enemy.y - 70 * enemy.scale, enemy.v.palette.fist, 12);
     this._spark(enemy.x, enemy.y - 70 * enemy.scale, hb.kb > 400 ? '#ffd23f' : '#ffffff');
@@ -447,25 +738,29 @@ export class GameScene extends Phaser.Scene {
         this.cameras.main.shake(300, 0.026);
         this.burst(enemy.x, enemy.y - 80 * enemy.scale, 0xffd23f, 60);
         this.burst(enemy.x, enemy.y - 80 * enemy.scale, 0xff3b30, 40);
-        const bonus = Math.round(CONFIG.BOSS.SCORE * this.mods.scoreMul);
+        const bonus = Math.round(CONFIG.BOSS.SCORE * scoreMul);
         this.score += bonus;
         this.ui.banner('BOSS DOWN!  +' + bonus, '#ffd23f');
         this.ui.floatText('BOSS DOWN!', enemy.x, enemy.y - 200 * enemy.scale, '#ffd23f', 40);
-        this.pickups.push(new Pickup(this, enemy.x, enemy.y - 60));
+        this.pickups.push(new Pickup(this, enemy.x, enemy.y - 60, 'health'));
         this.audio && this.audio.bigHit();
         return;
       }
-      const gain2 = Math.round(enemy.v.score * mult * this.mods.scoreMul);
+      const gain2 = Math.round(enemy.v.score * mult * scoreMul);
       this.score += gain2;
       this.burst(enemy.x, enemy.y - 70 * enemy.scale, enemy.v.palette.accent, 26);
       this.cameras.main.shake(120, 0.014);
       this.audio && this.audio.bigHit();
       this.slowmo = 0.18;
       this.ui.floatText('K.O. +' + gain2, enemy.x, enemy.y - 150 * enemy.scale, enemy.v.palette.fist, 26);
-      // chance to drop a health pickup (more likely if player low)
+      // chance to drop a pickup (more likely if player low). Bombers never drop
+      // a heal-on-death (they leave a fire zone instead); rare rage drop otherwise.
       const dropChance = this.player.health < 40 ? 0.4 : 0.2;
-      if (Math.random() < dropChance && this.player.health < this.player.maxHealth) {
-        this.pickups.push(new Pickup(this, enemy.x, enemy.y - 60));
+      if (Math.random() < dropChance && this.player.health < this.player.maxHealth && enemy.variant !== 'bomber') {
+        this.pickups.push(new Pickup(this, enemy.x, enemy.y - 60, 'health'));
+      } else if (enemy.variant !== 'bomber' && Math.random() < 0.04 && this.rageT <= 0) {
+        // very rare rage drop from any non-boss kill
+        this.pickups.push(new Pickup(this, enemy.x, enemy.y - 60, 'rage'));
       }
     }
   }
@@ -586,8 +881,9 @@ export class GameScene extends Phaser.Scene {
           // breathing room.
           this.waveBreak = (this.wave <= CONFIG.RETENTION.EARLY_WAVE_BREAK_WAVES)
             ? CONFIG.RETENTION.EARLY_WAVE_BREAK : CONFIG.RETENTION.LATE_WAVE_BREAK;
-          this.score += Math.round(100 * this.wave * this.mods.scoreMul);
-          this.ui.banner('WAVE CLEAR  +' + Math.round(100 * this.wave * this.mods.scoreMul), '#6bff9e');
+          const clearBonus = Math.round(100 * this.wave * this._scoreMul());
+          this.score += clearBonus;
+          this.ui.banner('WAVE CLEAR  +' + clearBonus, '#6bff9e');
         }
       }
     } else {
@@ -605,18 +901,44 @@ export class GameScene extends Phaser.Scene {
     for (const p of this.pickups) {
       p.update(stepDt, this.player);
       if (p._collected) {
-        const heal = 25;
-        this.player.health = Math.min(this.player.maxHealth, this.player.health + heal);
-        this.healed += heal;
-        this.burst(this.player.x, this.player.y - 60, 0x35e1ff, 16);
-        this.audio && this.audio.combo(8);
-        this.ui.floatText('+' + heal + ' HP', this.player.x, this.player.y - 160, '#35e1ff', 22);
+        if (p.type === 'health') {
+          const heal = 25;
+          this.player.health = Math.min(this.player.maxHealth, this.player.health + heal);
+          this.healed += heal;
+          this.burst(this.player.x, this.player.y - 60, 0x35e1ff, 16);
+          this.audio && this.audio.combo(8);
+          this.ui.floatText('+' + heal + ' HP', this.player.x, this.player.y - 160, '#35e1ff', 22);
+        } else if (p.type === 'rage') {
+          this._startRage(CONFIG.CONTENT.PICKUP.RAGE_TIME);
+          this.ui.banner('RAGE!', '#ff8a3d');
+          this.ui.floatText('RAGE MODE', this.player.x, this.player.y - 160, '#ff8a3d', 26);
+          this.burst(this.player.x, this.player.y - 60, 0xff8a3d, 22);
+        } else if (p.type === 'score') {
+          const bonus = Math.round(CONFIG.CONTENT.PICKUP.SCORE_BONUS * this._scoreMul());
+          this.score += bonus;
+          this.ui.floatText('+' + bonus, this.player.x, this.player.y - 160, '#ffd23f', 28);
+          this.burst(this.player.x, this.player.y - 60, 0xffd23f, 22);
+          this.audio && this.audio.combo(10);
+        }
       }
     }
     this.pickups = this.pickups.filter((p) => p.scene);
 
     this._resolveCombat();
     this._updateShockwaves(stepDt);
+    this._updateHazards(stepDt);
+    this._updateProjectiles(stepDt);
+    this._updateMeteors(stepDt);
+
+    // rage buff timer
+    if (this.rageT > 0) {
+      const wasRage = this.rageT > 0;
+      this.rageT -= dt;
+      if (wasRage && this.rageT <= 0) {
+        this.rageT = 0;
+        this.ui.floatText('RAGE OFF', this.player.x, this.player.y - 140, '#9bb4c8', 20);
+      }
+    }
 
     // combo timer
     if (this.comboTimer > 0) {
@@ -649,7 +971,7 @@ export class GameScene extends Phaser.Scene {
 
   _updateHUD() {
     const alive = this.enemies.filter((e) => !e.dead);
-    const counts = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0, boss: 0 };
+    const counts = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0, shielder: 0, bomber: 0, ranger: 0, boss: 0 };
     for (const e of alive) if (counts[e.variant] != null) counts[e.variant]++;
     // boss HP for the top-of-screen bar (null when no boss is alive)
     const bossAlive = this.boss && !this.boss.dead ? this.boss : null;
@@ -660,6 +982,8 @@ export class GameScene extends Phaser.Scene {
       bestCombo: this.bestCombo,
       comboTimer: this.comboTimer, comboWindow: CONFIG.COMBO_WINDOW,
       boss: bossAlive ? { hp: this.boss.health, maxHp: this.boss.maxHealth, enraged: this.boss.enraged } : null,
+      rage: Math.max(0, this.rageT), rageMax: this.rageMax,
+      event: this.activeEvent,
     });
     if (typeof window !== 'undefined') {
       window.__stickman = {
@@ -686,6 +1010,12 @@ export class GameScene extends Phaser.Scene {
         shockwaves: this.shockwaves.length,
         pickups: this.pickups.length,
         firstBlood: this.firstBloodDone,
+        // round-5 content telemetry
+        hazards: this.hazards.length,
+        projectiles: this.projectiles.length,
+        meteors: this.meteorWarnings.length,
+        rage: Math.max(0, this.rageT),
+        event: this.activeEvent,
       };
     }
   }

@@ -324,6 +324,29 @@ export class UIScene extends Phaser.Scene {
       }).setDepth(101);
     }
 
+    // RAGE bar — a thin orange bar under the HP bar that only appears while the
+    // rage buff is active, so the player sees both the payoff (x2 score / harder
+    // hits) and the remaining duration.
+    if (hud.rage && hud.rage > 0) {
+      const rb_w = bw, rb_h = 7, rb_y = by + bh + 4;
+      g.fillStyle(0x000000, 0.5);
+      g.fillRoundedRect(bx - 2, rb_y - 2, rb_w + 4, rb_h + 4, 4);
+      g.fillStyle(0x2a1208, 0.95);
+      g.fillRoundedRect(bx, rb_y, rb_w, rb_h, 3);
+      const rfrac = clamp(hud.rage / (hud.rageMax || 1), 0, 1);
+      const pulse = 0.7 + 0.3 * Math.sin(this.time.now * 0.02);
+      g.fillStyle(0xff8a3d, pulse);
+      g.fillRoundedRect(bx, rb_y, Math.max(0, rb_w * rfrac), rb_h, 3);
+      if (!this._rageLabel) {
+        this._rageLabel = this.add.text(bx + rb_w / 2, rb_y + rb_h / 2, 'RAGE', {
+          fontFamily: 'Arial Black', fontSize: '9px', color: '#ffffff',
+        }).setOrigin(0.5).setDepth(101);
+      }
+      this._rageLabel.setAlpha(0.9 * rfrac);
+    } else if (this._rageLabel) {
+      this._rageLabel.setAlpha(0);
+    }
+
     this.scoreText.setText(String(hud.score));
     this.waveText.setText('WAVE ' + hud.wave);
     this.enemyText.setText(hud.enemiesLeft > 0 ? (hud.enemiesLeft + ' left') : '');

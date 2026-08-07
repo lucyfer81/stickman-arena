@@ -107,6 +107,67 @@ export const CONFIG = {
     SHOCKWAVE_DAMAGE: 12,
     SHOCKWAVE_CLEAR: 34,          // feet must rise this many px to jump over
   },
+
+  // ---- content variety (round 5) ----
+  // New enemy archetypes + the systems they touch: a hazard layer (ground
+  // fire from bombers / meteor storms), a projectile layer (ranger throws),
+  // a multi-type pickup, and a rare-event director that remixes waves so no
+  // two runs play the same. All built on the existing shockwave array pattern.
+  CONTENT: {
+    // shielder — frontal guard blocks light hits; a kick (heavy) breaks guard.
+    SHIELDER: {
+      GUARD_BREAK_TIME: 1.1,   // seconds guard is down after a heavy hit
+      GUARD_SHOVE: 60,         // tiny chip shove on a blocked light hit
+    },
+    // bomber — volatile; detonates a ground fire zone on death or on contact.
+    BOMBER: {
+      FUSE_RANGE: 78,          // distance to player that starts the fuse
+      FUSE_TIME: 0.6,          // telegraph before detonation
+      BLAST_RADIUS: 96,        // knockback radius on detonation
+      BLAST_KNOCKBACK: 520,
+      FIRE_RADIUS: 70,         // ground fire zone half-width
+      FIRE_LIFE: 3.2,          // how long the fire lingers
+      FIRE_DPS: 26,            // damage/sec to anything standing in it
+      FIRE_DMG_PLAYER: 14,     // contact hit on the player from the blast itself
+    },
+    // ranger — kites and lobs projectiles; forces the player to close distance.
+    RANGER: {
+      KITE_RANGE: 320,         // tries to keep at least this far from the player
+      THROW_RANGE: 560,        // max range to start a throw
+      THROW_CD: [1.6, 2.6],    // seconds between throws
+      THROW_WINDUP: 0.5,
+      PROJECTILE_SPEED: 460,
+      PROJECTILE_ARC: -420,    // initial upward velocity (lobbed arc)
+      PROJECTILE_DMG: 10,
+      PROJECTILE_RADIUS: 12,   // collision radius
+      PROJECTILE_LIFE: 3.0,
+    },
+    // hazard layer (ground fire) — shared by bomber blasts + meteor event.
+    HAZARD: {
+      TICK: 0.5,               // damage tick interval
+    },
+    // meteor storm event — periodic falling strikes during an event wave.
+    METEOR: {
+      INTERVAL: [1.4, 2.6],    // seconds between meteors
+      WARN_TIME: 0.7,          // ground marker telegraph before impact
+      RADIUS: 60,
+      KNOCKBACK: 460,
+      DAMAGE: 16,
+    },
+    // multi-type pickups.
+    PICKUP: {
+      RAGE_TIME: 8.0,          // rage buff duration
+      RAGE_DMG_MUL: 1.6,       // player attack damage multiplier while raging
+      RAGE_SCORE_MUL: 2.0,     // score multiplier while raging
+      SCORE_BONUS: 500,        // instant score from a gold score-bomb pickup
+      LIFE: 9,
+    },
+    // rare-event director — remixes one wave occasionally for variety.
+    EVENTS: {
+      CHANCE: 0.20,            // probability a non-boss wave (after wave 2) is an event wave
+      MIN_WAVE: 3,             // earliest wave an event can fire
+    },
+  },
 };
 
 // Difficulty presets — multiplied into enemy stats at spawn + player HP.
