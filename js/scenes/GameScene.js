@@ -342,13 +342,17 @@ export class GameScene extends Phaser.Scene {
     c.dir = c.touchActive ? c.touchDir : kbDir;
     c.jumpHeld = c.jumpHeldTouch || kbJumpHeld;
 
-    // progressive onboarding: flag each action the first time it's used
+    // progressive onboarding: flag each action the first time it's used.
+    // NOTE: jump is only OBSERVED here — its action lives in Player.update (the
+    // jump-buffer arm), so c.jumpPressed must survive until player.update() reads
+    // it. Consuming it here (like punch/kick) starved the buffer and broke every
+    // jump key (W / Space / Up). It is cleared after player.update() below.
     const ob = this.onboard;
     ob.t += dt;
     if (c.dir !== 0) ob.move = true;
     if (c.punchPressed) { p_tryAttack(this, 'punch'); c.punchPressed = false; ob.punch = true; }
     if (c.kickPressed) { p_tryAttack(this, 'kick'); c.kickPressed = false; ob.kick = true; }
-    if (c.jumpPressed) { c.jumpPressed = false; ob.jump = true; }
+    if (c.jumpPressed) ob.jump = true;
 
     // slow-motion right after a kill
     let stepDt = dt;
@@ -358,6 +362,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.player.update(stepDt, c);
+    c.jumpPressed = false; // now that Player has read it, consume the edge
 
     // wave logic
     if (this.waveActive) {

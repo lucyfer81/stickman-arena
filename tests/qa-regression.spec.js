@@ -175,4 +175,36 @@ test.describe('QA regression', () => {
     expect(counts.before).toBeGreaterThan(0);
     expect(counts.after).toBe(0);
   });
+
+  test('keyboard jump (W / Space / Up) actually leaves the ground', async ({ page }) => {
+    // Regression: onboarding consumed c.jumpPressed before Player.update read it,
+    // so NO keyboard jump key worked. Touch jump shared the same flag.
+    test.setTimeout(30000);
+    await startGame(page);
+    const playerState = () => page.evaluate(() => {
+      const g = window.__game;
+      for (const sc of g.scene.scenes) if (sc && sc.player) {
+        return { y: sc.player.y, vy: sc.player.vy, onGround: sc.player.onGround };
+      }
+      return null;
+    });
+    const tryJump = async (key) => {
+      // make sure we're grounded first
+      for (let i = 0; i < 10; i++) {
+        const s = await playerState();
+        if (s && s.onGround) break;
+        await page.waitForTimeout(60);
+      }
+      const before = await playerState();
+      await page.keyboard.down(key);
+      await page.waitForTimeout(40);
+      await page.keyboard.up(key);
+      await page.waitForTimeout(120);
+      const after = await playerState();
+      return after && (after.onGround === false || after.y < before.y - 5);
+    };
+    expect(await tryJump('w')).toBe(true);
+    expect(await tryJump('Space')).toBe(true);
+    expect(await tryJump('ArrowUp')).toBe(true);
+  });
 });
