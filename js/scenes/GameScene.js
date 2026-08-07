@@ -14,6 +14,8 @@ export class GameScene extends Phaser.Scene {
     drawBackground(this);
     this.audio = this.registry.get('audio');
     this.audio && this.audio.resume();
+    // ensure the generative soundtrack is up at combat intensity on enter
+    this.audio && this.audio.startMusic && this.audio.startMusic('combat');
 
     this.shadows = this.add.graphics().setDepth(5);
     this.fxLayer = this.add.graphics().setDepth(20); // hit sparks drawn direct
@@ -388,6 +390,12 @@ export class GameScene extends Phaser.Scene {
     this.spawnTimer = (n === 1) ? CONFIG.RETENTION.WAVE1_FIRST_SPAWN : 0.3;
     this.waveFirstSpawn = true;
     this.audio && this.audio.wave(n);
+    // soundtrack follows the wave shape: boss waves get the driving intensity,
+    // normal waves relax back to the combat groove (unless we're mid-Second-Wind).
+    if (this.audio && this.audio.setMusicIntensity) {
+      if (this.isBossWave) this.audio.setMusicIntensity('boss');
+      else if (!this.player || !this.player.broken) this.audio.setMusicIntensity('combat');
+    }
   }
 
   spawnOne() {
@@ -789,6 +797,8 @@ export class GameScene extends Phaser.Scene {
     this.ui.banner('SECOND WIND!', '#ff3b30');
     this.ui.floatText('SHATTERED', p.x, p.y - 200, '#ff3b30', 34);
     this.audio && this.audio.gameover && this.audio.bigHit && this.audio.bigHit();
+    // the soundtrack turns desperate during the last stand.
+    this.audio && this.audio.setMusicIntensity && this.audio.setMusicIntensity('broken');
   }
 
   // REFORM: called from the health-pickup path while broken. Snaps the arm back
@@ -816,6 +826,10 @@ export class GameScene extends Phaser.Scene {
     this.ui.banner('REFORMED!  +' + bonus, '#6bff9e');
     this.ui.floatText('REFORMED!', p.x, p.y - 200, '#6bff9e', 36);
     this.audio && this.audio.combo && this.audio.combo(16);
+    // survival resolved — hand the soundtrack back to the wave's intensity.
+    if (this.audio && this.audio.setMusicIntensity) {
+      this.audio.setMusicIntensity(this.isBossWave ? 'boss' : 'combat');
+    }
   }
 
   // shatter-prop physics + draw (a detached stickman arm = two line segments)
@@ -1337,6 +1351,8 @@ export class GameScene extends Phaser.Scene {
         brokenMax: this.player.brokenMax,
         secondWindUsed: this.player.secondWindUsed,
         reformed: !this.player.broken && this.player.secondWindUsed,
+        // generative-soundtrack state (observable for tests / debug)
+        music: this.audio && this.audio.getMusicState ? this.audio.getMusicState() : null,
       };
     }
   }

@@ -332,4 +332,33 @@ bomber 爆炸、陨石落地、shielder 格挡 clang、玩家硬落地（>720px/
 仍是代理指标（无真人手感）；未来可加：破碎期间的专属动作（头槌/绝望一击）、重塑后的短暂
 "完美态"、或把 Second Wind 计数接入 meta 解锁（"曾重塑 N 次"徽章）。
 
+## 上线后模拟（Steam 评价驱动迭代）
+
+假设游戏已发售，写了 20 正面 + 20 负面 Steam 评价（基于真实特性，存于
+`docs/post-launch-reviews.md`），归类反复出现的抱怨，定位根因，真实修复。
+
+### Round A — 最常见抱怨：**没有音乐（全程死寂）**
+20 条差评里 6 条（30%）点名，且所有玩家都会中招——把游戏最强的"手感"（顿帧/慢镜）放在
+死气沉沉的背景里播放。
+
+**根因（源码核实）**：`AudioManager.js` 只有一次性程序化音效（punch/kick/hit…），全仓库
+搜 `bgm|music|ambient` 零命中，无任何场景启动过持续音频床——标题、每一波、每个 Boss、每个
+Second Wind 瞬间都是纯静音。
+
+**修复**：给 `AudioManager` 加**程序化生成音乐引擎**（沿用"100% 程序化、无外部文件"哲学，
+和音效同源）：
+- 经典 lookahead 调度器（25ms tick、0.2s 前瞻、精确 AudioContext 时间排程），16 步/小节。
+- 四档 intensity，场景事件即时切档：menu（92bpm 琶音+pad）→ combat（126bpm 贝斯+鼓）→
+  boss（150bpm 和声小调紧张+密集鼓）→ broken（140bpm 减音阶绝望）。
+- 独立 `musicGain` 挂在 master 下：音量/暂停静音自动生效；比 SFX 低一档不抢戏。
+- 接入点：Title 启动 menu→start 切 combat；GameScene.create 确保 combat；startWave 按
+  boss/普通切档；`_onEnterBroken`→broken；`_reform`→还原；GameOverScene.create stopMusic。
+- 遥测：`window.__stickman.music` + `window.__audio.getMusicState()`（on/intensity/bpm）。
+
+**验证**：新增 `tests/music.spec.js` 4/4（菜单/战斗、boss 切档往返、Second Wind 切档+reform
+还原、gameover 停止音乐，全程零 error），注册 `music` project。回归：官方 CI 5/5、laststand
+4/4、boss 3/3、volume 1/1 全绿（dev 套件中途一次 8 失败为我强杀长命令留下的孤儿进程争用
+8080 端口，清掉后单独跑全过，非代码回归）。
+
+
 

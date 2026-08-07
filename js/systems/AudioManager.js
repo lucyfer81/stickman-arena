@@ -1,6 +1,53 @@
 // Procedural audio via WebAudio. No external files.
 // Volume is a 3-level cycle (high/low/mute) persisted to localStorage.
+//
+// In addition to one-shot SFX, the manager runs a GENERATIVE MUSIC engine: a
+// lookahead scheduler loops a 16-step bar, and the active "intensity" picks the
+// tempo/scale/drum pattern. This is the soundtrack — there are no audio files.
+// Intensities: menu (calm pad/arp) -> combat (groove) -> boss (driving) ->
+// broken (tense). Routed through its own gain so it ducks under SFX and obeys
+// the master volume / pause-mute.
 const LEVELS = [0.6, 0.3, 0];
+
+// --- generative music patterns (16 steps / bar, 16th-note grid) ---
+// scale = absolute frequencies; arp arrays hold indices into `scale`; bass
+// arrays hold absolute low frequencies (or null = rest); drums are 0/1 gates.
+const MUSIC = {
+  menu: {
+    bpm: 92,
+    scale: [220.00, 261.63, 293.66, 329.63, 392.00],      // A minor pentatonic
+    arp:  [0, null, 2, null, 4, null, 3, null, 2, null, 1, null, 4, null, 3, null],
+    arpOct: 1,
+    pad: [220.00, 261.63, 329.63],                         // sustained chord every 8 steps
+    bass: null,
+    drums: null,
+  },
+  combat: {
+    bpm: 126,
+    scale: [220.00, 261.63, 293.66, 329.63, 392.00, 440.00],
+    arp:  [0, null, null, 2, null, 3, null, null, 2, null, null, 4, null, 3, null, null],
+    arpOct: 1,
+    bass: [110.00, null, null, null, 110.00, null, null, null, 130.81, null, null, null, 87.31, null, null, null],
+    drums: { kick: [1,0,0,0,1,0,0,0,1,0,0,0,1,0,1,0], snare: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0], hat: [0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,1] },
+  },
+  boss: {
+    bpm: 150,
+    scale: [220.00, 261.63, 311.13, 329.63, 392.00, 466.16], // harmonic-minor tension (Eb, Bb)
+    arp:  [0, 2, 1, 2, 3, 2, 1, 2, 0, 2, 4, 2, 3, 2, 1, 2],
+    arpOct: 1,
+    bass: [55.00, null, 55.00, null, 55.00, null, null, 55.00, 65.41, null, 65.41, null, 49.00, null, null, 49.00],
+    drums: { kick: [1,0,0,1,1,0,0,1,1,0,0,1,1,0,1,1], snare: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,1], hat: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1] },
+  },
+  broken: {
+    bpm: 140,
+    scale: [220.00, 233.08, 293.66, 311.13, 369.99],        // diminished/tense (Bb, Eb, F#)
+    arp:  [0, null, 1, null, null, 3, null, 1, 0, null, 4, null, null, 1, null, 3],
+    arpOct: 1,
+    bass: [55.00, null, null, 58.27, null, null, 55.00, null, null, 61.74, null, null, 49.00, null, 51.91, null],
+    drums: { kick: [1,0,0,0,0,0,1,0,1,0,0,0,0,0,1,0], snare: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0], hat: [0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0] },
+  },
+};
+const MUSIC_VOL = { menu: 0.11, combat: 0.14, boss: 0.16, broken: 0.12 };
 
 export class AudioManager {
   constructor() {
@@ -38,11 +85,14 @@ export class AudioManager {
   }
 
   destroy() {
+    if (this._music && this._music.timer) { clearInterval(this._music.timer); this._music.timer = null; }
+    this._music = null;
     for (const id of this._timers) clearTimeout(id);
     this._timers.clear();
     try { if (this.ctx) this.ctx.close(); } catch (e) {}
     this.ctx = null;
     this.master = null;
+    this.musicGain = null;
   }
 
   resume() {
@@ -72,6 +122,160 @@ export class AudioManager {
   }
 
   _silent() { return !this.enabled || this.volume <= 0 || this.suppressed; }
+
+  // ===================== GENERATIVE MUSIC ENGINE =====================
+  // A lookahead scheduler (the classic "A Tale of Two Clocks" pattern): a 25ms
+  // interval peeks 0.2s ahead and schedules notes at precise AudioContext
+  // times. The active intensity selects tempo + patterns, so scene events can
+  // retune the mood instantly (menu/combat/boss/broken). Music lives on its own
+  // gain node below the master, so master volume + pause-mute apply for free.
+  _initMusic() {
+    if (this._music) return;
+    this.musicGain = this.ctx.createGain();
+    this.musicGain.gain.value = 0.0001;
+    this.musicGain.connect(this.master);
+    this._music = { on: false, intensity: 'combat', step: 0, nextNoteTime: 0, timer: null };
+    // single recurring tick for the engine's whole life; it no-ops when off or
+    // when the context isn't running (e.g. before the first user gesture).
+    this._music.timer = setInterval(() => this._musicTick(), 25);
+  }
+
+  startMusic(intensity = 'combat') {
+    this._ensure();
+    if (!this.ctx) return;
+    if (!this._music) this._initMusic();
+    this._music.on = true;
+    this._music.intensity = intensity in MUSIC ? intensity : 'combat';
+    this._applyMusicGain();
+  }
+
+  setMusicIntensity(intensity) {
+    if (!this._music || !(intensity in MUSIC)) return;
+    if (this._music.intensity === intensity) return;
+    this._music.intensity = intensity;
+    this._applyMusicGain();
+  }
+
+  stopMusic() {
+    if (!this._music) return;
+    this._music.on = false;
+    this._applyMusicGain();
+  }
+
+  getMusicState() {
+    if (!this._music) return { on: false, intensity: null, bpm: 0 };
+    const pat = MUSIC[this._music.intensity] || MUSIC.combat;
+    return { on: !!this._music.on, intensity: this._music.intensity, bpm: pat.bpm };
+  }
+
+  _applyMusicGain() {
+    if (!this._music || !this.musicGain || !this.ctx) return;
+    try {
+      const base = MUSIC_VOL[this._music.intensity] != null ? MUSIC_VOL[this._music.intensity] : 0.14;
+      const target = this._music.on ? Math.max(0.0001, base) : 0.0001;
+      const t = this.ctx.currentTime;
+      this.musicGain.gain.cancelScheduledValues(t);
+      this.musicGain.gain.setValueAtTime(Math.max(0.0001, this.musicGain.gain.value), t);
+      this.musicGain.gain.linearRampToValueAtTime(target, t + 0.45);
+    } catch (e) {}
+  }
+
+  _musicTick() {
+    if (!this._alive() || !this._music || !this._music.on) return;
+    if (this.ctx.state !== 'running') return;            // no audio until gesture-resumed
+    const m = this._music;
+    const pat = MUSIC[m.intensity] || MUSIC.combat;
+    const stepDur = (60 / pat.bpm) / 4;                  // 16th note
+    const lookahead = 0.2;
+    if (m.nextNoteTime < this.ctx.currentTime) m.nextNoteTime = this.ctx.currentTime + 0.02;
+    let guard = 0;
+    while (m.nextNoteTime < this.ctx.currentTime + lookahead && guard++ < 64) {
+      this._scheduleStep(m.step, m.nextNoteTime, pat);
+      m.nextNoteTime += stepDur;
+      m.step = (m.step + 1) % 16;
+    }
+  }
+
+  _scheduleStep(step, time, pat) {
+    try {
+      if (pat.bass) { const f = pat.bass[step]; if (f) this._mBass(f, time, 0.20); }
+      if (pat.arp) {
+        const deg = pat.arp[step];
+        if (deg != null) {
+          const f = pat.scale[deg % pat.scale.length] * (pat.arpOct || 1);
+          this._mOsc(f, time, 0.16, 'triangle', 0.085);
+        }
+      }
+      if (pat.pad && (step % 8 === 0)) { for (const f of pat.pad) this._mOsc(f, time, 1.7, 'sine', 0.045); }
+      if (pat.drums) {
+        const d = pat.drums;
+        if (d.kick && d.kick[step]) this._mKick(time);
+        if (d.snare && d.snare[step]) this._mSnare(time);
+        if (d.hat && d.hat[step]) this._mHat(time);
+      }
+    } catch (e) {}
+  }
+
+  // scheduled (absolute-time) note helpers — independent of the SFX _env path.
+  _mOsc(freq, time, dur, type, peak) {
+    const ctx = this.ctx;
+    const o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, time);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), time + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    o.connect(g); g.connect(this.musicGain);
+    o.start(time); o.stop(time + dur + 0.03);
+  }
+
+  _mBass(freq, time, dur) {
+    const ctx = this.ctx;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(freq, time);
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = 460; f.Q.value = 7;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.exponentialRampToValueAtTime(0.20, time + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    o.connect(f); f.connect(g); g.connect(this.musicGain);
+    o.start(time); o.stop(time + dur + 0.03);
+  }
+
+  _mKick(time) {
+    const ctx = this.ctx;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(135, time);
+    o.frequency.exponentialRampToValueAtTime(45, time + 0.11);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.exponentialRampToValueAtTime(0.28, time + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + 0.16);
+    o.connect(g); g.connect(this.musicGain);
+    o.start(time); o.stop(time + 0.2);
+  }
+
+  _mSnare(time) { this._mNoiseHit(time, 0.16, 1800, 'bandpass', 0.14); }
+
+  _mHat(time) { this._mNoiseHit(time, 0.045, 8000, 'highpass', 0.045); }
+
+  _mNoiseHit(time, dur, ff, ftype, peak) {
+    const ctx = this.ctx;
+    const src = this._noise(dur);
+    const f = ctx.createBiquadFilter();
+    f.type = ftype; f.frequency.value = ff;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), time + 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    src.connect(f); f.connect(g); g.connect(this.musicGain);
+    src.start(time); src.stop(time + dur + 0.03);
+  }
+  // ===================== /GENERATIVE MUSIC ENGINE =====================
 
   _noise(dur) {
     const ctx = this.ctx;

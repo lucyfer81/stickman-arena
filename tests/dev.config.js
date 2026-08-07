@@ -36,6 +36,7 @@ module.exports = defineConfig({
     project('eval',        /eval-secondwind\.spec\.js/, 90000),
     project('laststand',   /laststand\.spec\.js/,    90000),
     project('meta',        /meta\.spec\.js/,         60000),
+    project('music',       /music\.spec\.js/,         60000),
     project('onboard',     /onboard\.spec\.js/,      60000),
     project('playthrough', /playthrough\.spec\.js/, 180000),
     project('qa',          /qa-regression\.spec\.js/, 120000),
