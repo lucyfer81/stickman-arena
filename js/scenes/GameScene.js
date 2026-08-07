@@ -16,7 +16,8 @@ export class GameScene extends Phaser.Scene {
     this.audio && this.audio.resume();
 
     this.shadows = this.add.graphics().setDepth(5);
-    this.fxLayer = this.add.graphics().setDepth(20); // hit sparks drawn directly
+    this.fxLayer = this.add.graphics().setDepth(20); // hit sparks drawn direct
+    this.ringLayer = this.add.graphics().setDepth(21); // expanding impact rings
     this.shockLayer = this.add.graphics().setDepth(19); // boss ground-slam shockwaves
     this.fireLayer = this.add.graphics().setDepth(18); // ground fire (bomber/meteor)
     this.projLayer = this.add.graphics().setDepth(20); // ranger projectiles + meteor markers
@@ -26,6 +27,10 @@ export class GameScene extends Phaser.Scene {
     this.hazards = [];        // ground fire zones { x, w, life, t, tick, dps }
     this.projectiles = [];    // ranger lobbed projectiles
     this.meteorWarnings = []; // telegraph markers before a meteor impact
+    this.rings = [];          // expanding impact rings { x, y, t, life, maxR, width, color }
+    this.camBoost = 0;        // punch-zoom boost (zoom = 1 + boost); decays each frame
+    this.camShoveX = 0;       // directional camera recoil (px), eased back to 0
+    this.camShoveY = 0;
     this.boss = null;            // live boss reference (for the HP bar + payoff)
     this.isBossWave = false;     // every 5th wave is a single-boss encounter
     this.score = 0;
@@ -209,23 +214,27 @@ export class GameScene extends Phaser.Scene {
   }
 
   _setupParticles() {
-    // hit burst emitter
+    // hit burst emitter — gravity makes the sparks/debris arc and fall, which
+    // sells weight far better than floating dots. Faster + more particles for a
+    // punchier burst; additive blend keeps it bright.
     this.hitEmitter = this.add.particles(0, 0, 'dot', {
-      speed: { min: 120, max: 420 },
+      speed: { min: 160, max: 560 },
       angle: { min: 0, max: 360 },
-      scale: { start: 0.7, end: 0 },
-      lifespan: { min: 220, max: 480 },
+      scale: { start: 0.85, end: 0 },
+      lifespan: { min: 240, max: 520 },
+      gravityY: 720,
       blendMode: 'ADD',
-      quantity: 14,
+      quantity: 18,
       emitting: false,
     }).setDepth(30);
     this.dustEmitter = this.add.particles(0, 0, 'dot', {
-      speed: { min: 40, max: 140 },
+      speed: { min: 50, max: 170 },
       angle: { min: 200, max: 340 },
-      scale: { start: 0.5, end: 0 },
-      lifespan: { min: 200, max: 380 },
+      scale: { start: 0.55, end: 0 },
+      lifespan: { min: 220, max: 420 },
+      gravityY: 360,
       tint: 0x6b86a3,
-      quantity: 6,
+      quantity: 8,
       emitting: false,
     }).setDepth(6);
   }
@@ -246,6 +255,84 @@ export class GameScene extends Phaser.Scene {
   dustBurst(x, y, count = 8) {
     this.dustEmitter.setPosition(x, y);
     this.dustEmitter.explode(count);
+  }
+
+  // ---- game-feel helpers (pure feedback, no mechanic change) ----
+  // snap the camera in: zoom boosts instantly and eases back; shove recoils
+  // opposite the blow direction (clamped to zoom headroom so edges never show).
+  _punchZoom(boost, dirX = 0, shoveY = 0) {
+    const F = CONFIG.FEEL;
+    this.camBoost = Math.min(F.ZOOM.MAX, Math.max(this.camBoost, boost));
+    if (dirX) this.camShoveX = clamp(this.camShoveX + dirX, -F.SHOVE.BOSS, F.SHOVE.BOSS);
+    if (shoveY) this.camShoveY = clamp(this.camShoveY + shoveY, 0, F.SHOVE.DOWN * 1.4);
+  }
+
+  // expanding impact ring — the classic impact tell. Drawn persistently on its
+  // own layer (survives the spark's short clear window) and fades as it grows.
+  _impactRing(x, y, color, spec) {
+    this.rings.push({
+      x, y, t: 0, life: spec.life, maxR: spec.maxR, width: spec.width, color,
+    });
+  }
+
+  // resolve FEEL.RING spec by event key (with a safe fallback)
+  _ringSpec(key) { return (CONFIG.FEEL.RING[key] || CONFIG.FEEL.RING.HEAVY); }
+
+  // apply the standard feedback stack for a landed hit. dirX = direction the
+  // blow travels (attacker -> target); the camera recoils the opposite way.
+  _impactFX(x, y, color, dirX, ringKey, zoomKey, sparkColor) {
+    const F = CONFIG.FEEL;
+    this._impactRing(x, y, color, this._ringSpec(ringKey));
+    const zoom = F.ZOOM[zoomKey] != null ? F.ZOOM[zoomKey] : F.ZOOM.HIT;
+    const shoveMag = F.SHOVE[zoomKey] != null ? F.SHOVE[zoomKey]
+      : (zoomKey === 'BOSS_KILL' ? F.SHOVE.BOSS : F.SHOVE.HIT);
+    this._punchZoom(zoom, 0, 0);
+    // recoil shove is applied directly so the magnitude honours the event weight
+    this.camShoveX = clamp(this.camShoveX - dirX * shoveMag, -F.SHOVE.BOSS, F.SHOVE.BOSS);
+    this._spark(x, y, sparkColor || color, dirX);
+  }
+
+  _updateCamera(dt) {
+    const F = CONFIG.FEEL;
+    // exponential ease-back to rest
+    const k = Math.exp(-dt / F.ZOOM.TAU);
+    this.camBoost *= k;
+    this.camShoveX *= k;
+    this.camShoveY *= k;
+    if (this.camBoost < 0.0008) this.camBoost = 0;
+    if (Math.abs(this.camShoveX) < 0.05) this.camShoveX = 0;
+    if (this.camShoveY < 0.05) this.camShoveY = 0;
+    const cam = this.cameras.main;
+    cam.setZoom(1 + this.camBoost);
+    // only shove while zoomed in (headroom); clamp to the px the zoom buys so we
+    // never reveal the world rectangle's edge.
+    const headX = (cam.width * this.camBoost) * 0.5 * 0.8;
+    const headY = (cam.height * this.camBoost) * 0.5 * 0.8;
+    cam.setScroll(
+      clamp(this.camShoveX, -headX, headX),
+      clamp(this.camShoveY, -headY, headY)
+    );
+  }
+
+  _updateRings(dt) {
+    const g = this.ringLayer;
+    g.clear();
+    if (!this.rings.length) return;
+    for (const r of this.rings) {
+      r.t += dt;
+      const p = clamp01(r.t / r.life);
+      // ease-out radius growth; alpha fades over the back half for a snappy lead
+      const rad = r.maxR * (1 - Math.pow(1 - p, 3));
+      const a = (p < 0.35 ? 1 : 1 - (p - 0.35) / 0.65);
+      g.lineStyle(r.width, r.color, a * 0.9);
+      g.strokeCircle(r.x, r.y, rad);
+      // soft inner glow disc on the opening frames
+      if (p < 0.5) {
+        g.fillStyle(r.color, a * 0.10);
+        g.fillCircle(r.x, r.y, rad * 0.7);
+      }
+    }
+    this.rings = this.rings.filter((r) => r.t < r.life);
   }
 
   // ---- waves ----
@@ -380,7 +467,9 @@ export class GameScene extends Phaser.Scene {
   // enrage callback: summon a pair of grunts near the boss to raise pressure.
   _bossEnrage(boss) {
     this.ui.banner('THE BOSS IS ENRAGED!', '#ff6f5c');
-    this.cameras.main.shake(200, 0.014);
+    this._punchZoom(CONFIG.FEEL.ZOOM.HURT, 0, 0);
+    this._impactRing(boss.x, boss.y - 80, 0xff3b30, this._ringSpec('HEAVY'));
+    this.cameras.main.shake(220, 0.016);
     this.audio && this.audio.bigHit();
     const n = CONFIG.BOSS.ENRAGE_SUMMONS;
     for (let i = 0; i < n; i++) {
@@ -565,17 +654,26 @@ export class GameScene extends Phaser.Scene {
     }
     // lingering ground fire
     this.spawnFireZone(x, { life: B.FIRE_LIFE, radius: B.FIRE_RADIUS, dps: B.FIRE_DPS });
-    this.burst(x, y - 60, 0xff7a00, 42);
-    this.burst(x, y - 60, 0xffd23f, 24);
-    this.dustBurst(x, CONFIG.GROUND_Y, 18);
-    this.cameras.main.shake(190, 0.022);
+    // blast feedback: orange/gold dual ring + downward punch-zoom (weight) +
+    // a chunky particle storm. The shockwave ring sells the radius.
+    this._impactRing(x, CONFIG.GROUND_Y - 20, 0xff7a00, this._ringSpec('BLAST'));
+    this._impactRing(x, CONFIG.GROUND_Y - 20, 0xffd23f, this._ringSpec('KILL'));
+    this._punchZoom(CONFIG.FEEL.ZOOM.BLAST, 0, CONFIG.FEEL.SHOVE.DOWN);
+    this.burst(x, y - 60, 0xff7a00, 46);
+    this.burst(x, y - 60, 0xffd23f, 28);
+    this.dustBurst(x, CONFIG.GROUND_Y, 22);
+    this.cameras.main.shake(210, 0.024);
     this.audio && this.audio.bigHit();
   }
 
   // shield "clang" feedback when a light hit is blocked
   _blockSpark(x, y) {
+    // a blocked hit still needs to feel like a real collision — a crisp cyan
+    // ring + tiny zoom tick + directional spark, just muted vs a clean hit.
+    this._impactRing(x, y, 0x35e1ff, CONFIG.FEEL.RING.HIT);
+    this._punchZoom(CONFIG.FEEL.ZOOM.HIT * 0.6, 0, 0);
     this._spark(x, y, '#35e1ff');
-    this.burst(x, y, 0x35e1ff, 8);
+    this.burst(x, y, 0x35e1ff, 10);
   }
 
   // ---- meteor storm event ----
@@ -603,9 +701,13 @@ export class GameScene extends Phaser.Scene {
         }
         // scorch the ground briefly
         this.spawnFireZone(w.x, { life: 1.8, radius: M.RADIUS * 0.75, dps: 18 });
-        this.burst(w.x, CONFIG.GROUND_Y - 20, 0xff7a00, 32);
-        this.dustBurst(w.x, CONFIG.GROUND_Y, 18);
-        this.cameras.main.shake(140, 0.014);
+        // a meteor strike deserves a full impact stack: orange ring + zoom
+        // punch with downward shove (a rock just slammed the ground).
+        this._impactRing(w.x, CONFIG.GROUND_Y - 20, 0xff7a00, this._ringSpec('BLAST'));
+        this._punchZoom(CONFIG.FEEL.ZOOM.BLAST, 0, CONFIG.FEEL.SHOVE.DOWN);
+        this.burst(w.x, CONFIG.GROUND_Y - 20, 0xff7a00, 36);
+        this.dustBurst(w.x, CONFIG.GROUND_Y, 22);
+        this.cameras.main.shake(170, 0.018);
         this.audio && this.audio.bigHit();
         w.dead = true;
       } else {
@@ -692,7 +794,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   _onPlayerHit(enemy, hb, killed) {
-    this.hitPause = Math.max(this.hitPause, hb.pause);
+    const F = CONFIG.FEEL;
+    const heavy = hb.kb > 400;
+    // extra hitstop for weight on heavy connecting hits (stacks on the attack's
+    // base HIT_PAUSE). The kill branch adds more below.
+    this.hitPause = Math.max(this.hitPause, hb.pause + (heavy ? F.PAUSE.HEAVY : 0));
     this.combo++;
     this.bestCombo = Math.max(this.bestCombo, this.combo);
     this.comboTimer = CONFIG.COMBO_WINDOW;
@@ -703,9 +809,18 @@ export class GameScene extends Phaser.Scene {
     const scoreMul = this._scoreMul();
     const gain = Math.round(10 * mult * scoreMul);
     this.score += gain;
-    this.burst(enemy.x, enemy.y - 70 * enemy.scale, enemy.v.palette.fist, 12);
-    this._spark(enemy.x, enemy.y - 70 * enemy.scale, hb.kb > 400 ? '#ffd23f' : '#ffffff');
-    this.cameras.main.shake(70, killed ? 0.012 : 0.006);
+    // hit direction: the blow travels from the player (hb.from) toward the enemy.
+    const dirX = Math.sign(enemy.x - hb.from) || (enemy.x >= hb.from ? 1 : -1);
+    const hitY = enemy.y - 70 * enemy.scale;
+    const sparkColor = heavy ? '#ffd23f' : '#ffffff';
+    // juice stack: directional spark + impact ring + punch-zoom + recoil shove.
+    this._impactFX(enemy.x, hitY, enemy.v.palette.fist, dirX,
+      heavy ? 'HEAVY' : 'HIT', heavy ? 'HEAVY' : 'HIT', sparkColor);
+    // particles scale with weight; the fist-tint burst reads as a chunk of the
+    // enemy getting knocked loose.
+    this.burst(enemy.x, hitY, enemy.v.palette.fist, heavy ? 20 : 13);
+    // snappier shake than before (was 0.006/0.012) so each connection has bite.
+    this.cameras.main.shake(heavy ? 90 : 60, heavy ? 0.014 : 0.009);
     this.audio && this.audio.hit();
     if (this.combo > 1) this.audio && this.audio.combo(this.combo);
     this.ui.floatText('+' + gain, enemy.x, enemy.y - 120 * enemy.scale, '#ffd23f');
@@ -717,6 +832,8 @@ export class GameScene extends Phaser.Scene {
     this._checkComboTier();
     if (killed) {
       this.kills++;
+      // a kill always carries a touch more hitstop for the "finishing" weight.
+      this.hitPause = Math.max(this.hitPause, hb.pause + F.PAUSE.KILL);
       // RETENTION: FIRST BLOOD — celebrate the run's first (non-boss) kill with a
       // bigger slow-mo + banner. It lands ~3-5s in: the cheapest possible memory
       // peak during the most churn-prone moment. Fires once; boss kills have
@@ -735,9 +852,15 @@ export class GameScene extends Phaser.Scene {
         this.boss = null;
         this.slowmo = Math.max(this.slowmo, 0.5);
         this.hitPause = Math.max(this.hitPause, 0.18);
+        const bx = enemy.x, by = enemy.y - 80 * enemy.scale;
+        // peak feedback: biggest zoom + ring + downward shove (sells the weight
+        // of a giant toppling) + dual-color particle storm.
+        this._impactRing(bx, by, 0xffd23f, this._ringSpec('BOSS_KILL'));
+        this._impactRing(bx, by, 0xff3b30, this._ringSpec('KILL'));
+        this._punchZoom(F.ZOOM.BOSS_KILL, 0, F.SHOVE.DOWN);
         this.cameras.main.shake(300, 0.026);
-        this.burst(enemy.x, enemy.y - 80 * enemy.scale, 0xffd23f, 60);
-        this.burst(enemy.x, enemy.y - 80 * enemy.scale, 0xff3b30, 40);
+        this.burst(bx, by, 0xffd23f, 64);
+        this.burst(bx, by, 0xff3b30, 44);
         const bonus = Math.round(CONFIG.BOSS.SCORE * scoreMul);
         this.score += bonus;
         this.ui.banner('BOSS DOWN!  +' + bonus, '#ffd23f');
@@ -748,7 +871,12 @@ export class GameScene extends Phaser.Scene {
       }
       const gain2 = Math.round(enemy.v.score * mult * scoreMul);
       this.score += gain2;
-      this.burst(enemy.x, enemy.y - 70 * enemy.scale, enemy.v.palette.accent, 26);
+      const kx = enemy.x, ky = enemy.y - 70 * enemy.scale;
+      // K.O. feedback: kill-tier ring + zoom, on top of the per-hit stack above.
+      this._impactRing(kx, ky, enemy.v.palette.accent, this._ringSpec('KILL'));
+      this._punchZoom(F.ZOOM.KILL, 0, 0);
+      this.camShoveX = clamp(this.camShoveX - dirX * F.SHOVE.KILL, -F.SHOVE.BOSS, F.SHOVE.BOSS);
+      this.burst(kx, ky, enemy.v.palette.accent, 30);
       this.cameras.main.shake(120, 0.014);
       this.audio && this.audio.bigHit();
       this.slowmo = 0.18;
@@ -766,27 +894,52 @@ export class GameScene extends Phaser.Scene {
   }
 
   _onPlayerHurt(enemy, hb) {
+    const F = CONFIG.FEEL;
     this.combo = 0;
     this.comboTimer = 0;
     this.hitsTaken++;
     this.hitPause = Math.max(this.hitPause, 0.08);
-    this.cameras.main.shake(160, 0.02);
-    this.burst(this.player.x, this.player.y - 100, COLORS.player.accent, 18);
-    this._spark(this.player.x, this.player.y - 100, '#ff3b30');
+    // a hit on the player is the other key feedback peak — zoom punch + red ring
+    // + a shake with real bite so getting hurt actually hurts.
+    const hx = this.player.x, hy = this.player.y - 100;
+    const dirX = enemy ? Math.sign(this.player.x - enemy.x) || 1 : (hb && hb.from != null ? Math.sign(this.player.x - hb.from) || 1 : 1);
+    this._impactRing(hx, hy, 0xff3b30, this._ringSpec('HURT'));
+    this._punchZoom(F.ZOOM.HURT, dirX, 0);
+    this.cameras.main.shake(170, 0.022);
+    this.burst(hx, hy, COLORS.player.accent, 20);
+    this._spark(hx, hy, '#ff3b30', dirX);
     this.audio && this.audio.bigHit();
   }
 
-  _spark(x, y, color) {
+  _spark(x, y, color, dirX) {
     const g = this.fxLayer;
     const cnum = (typeof color === 'string') ? parseInt(color.replace('#', ''), 16) : (color || 0xffffff);
+    const dir = dirX ? Math.sign(dirX) : 0;
+    const baseAng = dir !== 0 ? (dir > 0 ? 0 : Math.PI) : -1;
+    // white-hot core flash (reads as the moment of contact)
+    g.fillStyle(0xffffff, 0.9);
+    g.fillCircle(x, y, 7);
+    g.fillStyle(cnum, 0.5);
+    g.fillCircle(x, y, 13);
+    // bright streaks fanning out in the blow's direction (or omnidirectional
+    // when no dir) — thicker + more than before so the strike reads at a glance.
+    const n = dir !== 0 ? 7 : 6;
     g.lineStyle(3, cnum, 1);
-    const n = 6;
     for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2 + rand(-0.2, 0.2);
-      const r2 = rand(16, 28);
+      const a = dir !== 0
+        ? baseAng + rand(-0.95, 0.95)
+        : (i / n) * Math.PI * 2 + rand(-0.2, 0.2);
+      const r2 = rand(20, 34);
       g.lineBetween(x, y, x + Math.cos(a) * r2, y + Math.sin(a) * r2);
     }
-    this.time.delayedCall(60, () => this.fxLayer.clear());
+    // a couple of bright white tips for extra crackle
+    g.lineStyle(2, 0xffffff, 0.85);
+    for (let i = 0; i < 2; i++) {
+      const a = dir !== 0 ? baseAng + rand(-0.6, 0.6) : Math.random() * Math.PI * 2;
+      const r2 = rand(14, 22);
+      g.lineBetween(x, y, x + Math.cos(a) * r2, y + Math.sin(a) * r2);
+    }
+    this.time.delayedCall(85, () => this.fxLayer.clear());
   }
 
   _checkComboTier() {
@@ -817,7 +970,11 @@ export class GameScene extends Phaser.Scene {
     // hit pause freeze
     if (this.hitPause > 0) {
       this.hitPause -= dtMs / 1000;
-      // still render existing frames? entities already rendered last frame. keep frozen.
+      // feedback layers keep playing during the freeze so the impact reads: the
+      // ring expands across the frozen frame and the zoom holds at its peak.
+      // dt=0 here keeps the camera boost/shove from decaying mid-freeze.
+      this._updateRings(dt);
+      this._updateCamera(0);
       this._updateHUD();
       return;
     }
@@ -952,6 +1109,11 @@ export class GameScene extends Phaser.Scene {
       this.audio && this.audio.gameover();
       this.time.delayedCall(1400, () => this._endGame());
     }
+
+    // feedback layers run on real time so the juice always feels the same,
+    // independent of gameplay slow-mo.
+    this._updateRings(dt);
+    this._updateCamera(dt);
 
     this._updateHUD();
   }

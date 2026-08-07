@@ -168,6 +168,49 @@ export const CONFIG = {
       MIN_WAVE: 3,             // earliest wave an event can fire
     },
   },
+
+  // ---- GAME FEEL (juice pass) ----
+  // Pure feedback tuning — no mechanic/damage/timing changes. Magnitudes are
+  // small by design: stacked across a combo they build intensity without nausea.
+  FEEL: {
+    // camera punch-zoom: boost snaps up on impact, eases back exponentially.
+    // camBoost decays via boost *= exp(-dt / TAU); applied as zoom = 1 + boost.
+    ZOOM: {
+      HIT:        0.018,   // any landed hit
+      HEAVY:      0.034,   // kick / heavy-knockback hit (kb > 400)
+      HURT:       0.030,   // player took a hit
+      KILL:       0.050,   // enemy K.O.
+      BOSS_KILL:  0.095,   // boss death — the run's strongest feedback peak
+      SLAM:       0.045,   // boss ground-slam impact
+      BLAST:      0.052,   // bomber / meteor detonation
+      TAU:        0.075,   // exponential time-constant (smaller = snappier return)
+      MAX:        0.12,    // hard cap so long combos can't over-zoom
+    },
+    // directional camera shove (px, recoils opposite the blow). Clamped to the
+    // headroom the current zoom buys so it never reveals world edges.
+    SHOVE: {
+      HIT:    4,
+      HEAVY:  8,
+      KILL:   12,
+      BOSS:   18,
+      DOWN:   10,   // +y shove on big downward/slam impacts (sells weight)
+    },
+    // expanding impact ring drawn from the strike point.
+    RING: {
+      HIT:        { life: 0.22, maxR: 46, width: 4 },
+      HEAVY:      { life: 0.28, maxR: 66, width: 5 },
+      HURT:       { life: 0.26, maxR: 58, width: 5 },
+      KILL:       { life: 0.36, maxR: 96, width: 6 },
+      BOSS_KILL:  { life: 0.52, maxR: 170, width: 8 },
+      SLAM:       { life: 0.40, maxR: 120, width: 6 },
+      BLAST:      { life: 0.40, maxR: 130, width: 6 },
+    },
+    // extra hitstop (s) layered on top of the attack's base HIT_PAUSE for weight.
+    PAUSE: {
+      KILL:      0.035,   // a normal K.O.
+      HEAVY:     0.020,   // heavy connecting hit
+    },
+  },
 };
 
 // Difficulty presets — multiplied into enemy stats at spawn + player HP.

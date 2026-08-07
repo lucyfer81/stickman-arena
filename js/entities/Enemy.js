@@ -527,9 +527,14 @@ export class Enemy extends Stickman {
       this.scene.spawnShockwave(this.x, 1, B.SHOCKWAVE_SPEED);
       this.scene.spawnShockwave(this.x, -1, B.SHOCKWAVE_SPEED);
     }
-    this.scene.cameras.main.shake(190, 0.02);
-    this.scene.dustBurst && this.scene.dustBurst(this.x, CONFIG.GROUND_Y, 24);
-    this.scene.audio && this.scene.audio.bigHit();
+    // slam feedback: a heavy ground ring + downward punch-zoom sells the weight
+    // of a giant slamming down. Routed via scene helpers so FEEL tuning is shared.
+    const scene = this.scene;
+    if (scene._impactRing) scene._impactRing(this.x, CONFIG.GROUND_Y - 10, 0xff3b30, scene._ringSpec ? scene._ringSpec('SLAM') : { life: 0.4, maxR: 120, width: 6 });
+    if (scene._punchZoom) scene._punchZoom(CONFIG.FEEL.ZOOM.SLAM, 0, CONFIG.FEEL.SHOVE.DOWN);
+    scene.cameras.main.shake(210, 0.022);
+    scene.dustBurst && scene.dustBurst(this.x, CONFIG.GROUND_Y, 28);
+    scene.audio && scene.audio.bigHit();
   }
 
   _enrage() {

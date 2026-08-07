@@ -209,8 +209,14 @@ export class Player extends Stickman {
       this.y = CONFIG.GROUND_Y;
       if (this.vy > 420 && wasAir) {
         this.scene.audio && this.scene.audio.land();
-        this.scene.dustBurst && this.scene.dustBurst(this.x, CONFIG.GROUND_Y, Math.min(14, 6 + Math.floor(this.vy / 120)));
-        if (this.vy > 760) this.scene.cameras.main.shake(60, 0.004);
+        this.scene.dustBurst && this.scene.dustBurst(this.x, CONFIG.GROUND_Y, Math.min(16, 6 + Math.floor(this.vy / 110)));
+        if (this.vy > 720) {
+          // hard landing: a small ground ring + zoom tick + snappier shake gives
+          // the impact actual weight (was a near-imperceptible 0.004 shake).
+          if (this.scene._impactRing) this.scene._impactRing(this.x, CONFIG.GROUND_Y - 6, 0x6b86a3, { life: 0.18, maxR: 40, width: 3 });
+          if (this.scene._punchZoom) this.scene._punchZoom(0.014, 0, 0);
+          this.scene.cameras.main.shake(70, 0.008);
+        }
       }
       this.vy = 0;
       this.onGround = true;
@@ -225,7 +231,17 @@ export class Player extends Stickman {
     if (this.dead) {
       anim = { state: 'dead', time: this.animTime, deadT: this.deadT };
     } else if (this.state === 'punch' || this.state === 'kick') {
-      this.glow = (this.attack && this.attack.t >= this.attack.windup && this.attack.t <= this.attack.windup + this.attack.active) ? 1 : 0.35;
+      // ANTICIPATION: the fist glow ramps up through the windup (charging),
+      // peaks white-hot through the active window, then fades in recover. This
+      // telegraphs the committed swing visually — no timing/damage change.
+      const a = this.attack;
+      let g = 0.4;
+      if (a) {
+        if (a.t < a.windup) g = 0.25 + 0.6 * clamp01(a.t / a.windup);
+        else if (a.t <= a.windup + a.active) g = 1;
+        else g = 0.5 - 0.3 * clamp01((a.t - a.windup - a.active) / a.recover);
+      }
+      this.glow = g;
       anim = { state: this.state, phase: this.attack ? this.attack.phase : 0 };
     } else if (this.state === 'hurt') {
       anim = { state: 'hurt', time: this.hurtTime };
