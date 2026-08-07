@@ -148,3 +148,26 @@ Boss 解决了"峰值"，但**普通波战斗仍单调**——踢全程碾压拳
 趣味评估：这轮杠杆在于改善**所有波**的**每一秒**战斗（含 Boss 波），正面攻破硬核
 "踢spam=游戏已解"。拳/踢/取消三者形成：拳=安全起手+连段胶水（克快 runner）、
 踢=重击+控距+风险（克慢 brute、Boss 回复窗）。仍是代理指标；下轮候选=残血狂暴。
+
+### Round 4 — 首分钟留存（onboarding / 奖励节奏 / 进度感）
+
+假设玩家只玩 60 秒，攻新手+休闲的首分钟流失。设计文档见
+`docs/superpowers/specs/2026-08-07-first-minute-retention-design.md`。
+
+流失诊断（CONFIG 推演 + DESIGN.md persona 遥测）：①死时间（敌人墙边→中场 ~3.2s）
+②无威胁（casual 60s 满血）③引导只标注不教学（AFK 30s 仅掉 36 血看不懂）④最爽内容
+后置（boss/skins 首分钟全摸不到）⑤元进度局内不可见。
+
+五项改动：
+- **死时间**：wave1–3 出生点内移到距中场 ±280px 固定带；前3波波间 1.1→0.7s、出生间隔
+  (0.3,0.65)→(0.22,0.45)；wave1 首敌 spawnTimer 0.3→0.15。首接触 ~3.2s→~1.5s。
+- **早期施压**：`_applyScaling` 的 aggrMul 加 `Math.max(0.95, …)` 下限（原 floor 0.8）。
+- **教学引导**：UIScene 新 teach 层——首敌接近头顶箭头+"J/PUNCH"、残血"K/KICK 收割"、
+  AFK 兜底大字提示；GameScene 加 `onboard.firstHit`。保留桌面芯片。
+- **首分钟高潮**：当局限首杀（非 boss）→"FIRST BLOOD"横幅+慢镜0.3s；新变体 **vanguard**
+  （金、1.25×、50hp）仅 wave2 首刷，6–8s 小决斗。
+- **进度可见**：`Meta.nextUnlock` + HUD 目标条（滚动显示下一未解锁皮肤）+ 结算页
+  "明日 daily"与进度条。
+
+红线：boss 仍 wave5；难度/skins/daily 逻辑不改。新增 `tests/retention.spec.js`。
+本环境无浏览器系统库跑不了 `npm test`，已按构造保证不破坏现有断言。
