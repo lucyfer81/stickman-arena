@@ -113,6 +113,7 @@ export const CONFIG = {
     SCALE: 1.6,
     ATTACK_REACH: 120,
     SCORE: 1500,
+    NAME: { slammer: 'THE SLAMMER', caster: 'THE ORACLE' },
     SLAM_INTERVAL: 3.4,           // seconds between slams (phase 1)
     SLAM_INTERVAL_ENRAGED: 2.2,   // phase 2 (<=50% hp)
     SLAM_WINDUP: 0.7,             // telegraph duration — the must-jump cue
@@ -121,10 +122,27 @@ export const CONFIG = {
     SLAM_RECOVER: 0.55,
     ENRAGE_AT: 0.5,               // hp fraction that triggers phase 2 + minions
     ENRAGE_SUMMONS: 2,            // grunts spawned on enrage
+    ENRAGE_SUMMONS_KIND: { slammer: 'grunt', caster: 'leaper' }, // caster's adds punish jump-dodging
     SHOCKWAVE_SPEED: 430,
     SHOCKWAVE_LIFE: 2.6,
     SHOCKWAVE_DAMAGE: 12,
     SHOCKWAVE_CLEAR: 34,          // feet must rise this many px to jump over
+    // ---- Boss variant B: "The Oracle" — a ranged caster that alternates with
+    // the slammer (even boss-index waves: 10, 20, 30...). Same HP bar + enrage
+    // + kill payoff, but its special is a telegraphed projectile BARRAGE (lobbed,
+    // dodgeable by moving/jumping) instead of a ground-slam. The counter is to
+    // close distance and punish the recover window — a different fight shape.
+    CAST: {
+      WINDUP: 0.60,               // telegraph (glow ramps; the must-dodge cue)
+      RECOVER: 0.70,              // vulnerable window after releasing
+      INTERVAL: 2.6,              // seconds between barrages (phase 1)
+      INTERVAL_ENRAGED: 1.8,      // phase 2 (<=50% hp)
+      SHOTS: 3,                   // projectiles per barrage (phase 1)
+      SHOTS_ENRAGED: 5,           // projectiles per barrage (phase 2)
+      SPREAD: 150,                // px horizontal spread, centered on the player
+      PROJECTILE_DMG: 11,
+      RANGE: 760,                 // max range to start a barrage
+    },
   },
 
   // ---- content variety (round 5) ----

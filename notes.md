@@ -360,5 +360,36 @@ Second Wind 瞬间都是纯静音。
 4/4、boss 3/3、volume 1/1 全绿（dev 套件中途一次 8 失败为我强杀长命令留下的孤儿进程争用
 8080 端口，清掉后单独跑全过，非代码回归）。
 
+### Round B — 修复音乐后，新最常见抱怨：**重复/内容薄（Boss 单一）**
+修好音乐后写第二批评价，"没音乐"消失，抱怨分布前移：**重复/太薄 + 只有一两种 Boss** 合并
+成新 #1（4/12，且正面评价也在"要更多 Boss"）。本质是同一结构性问题——玩家到 wave 10+ 重复
+遇到同样的 Boss。
+
+**根因**：`_spawnBoss` 永远 `new Enemy(...,'boss')`，单一原型单一攻击（下砸）；无第二 Boss
+数据、无特殊攻击分支，`isBoss` 仅认 `'boss'`。
+
+**修复**：加第二 Boss「The Oracle」(caster)——
+- `VARIANTS.bossCaster`：毒绿、1.45×、200hp。专属特殊技是**预警 0.6s 后抛射弹幕**（3 发/
+  狂暴 5 发），复用 ranger 投掷物池（`spawnEnemyProjectile` 加可选 dmg 覆盖）；对抗是走位/
+  起跳躲避 + recover 窗口惩罚，区别于 slammer 的"必跳冲击波"。
+- **交替**：真实 boss 波按奇偶——wave 5/15/25=slammer、wave 10/20/30=caster；横幅+顶部血条
+  显示 Boss 名（THE SLAMMER / THE ORACLE）。
+- **变体感知狂暴**：caster 召唤 leaper（防空，惩罚跳躲弹幕）替代 slammer 的 grunt。
+- 共享基础设施不变：两 Boss 共用血条/狂暴/超甲/BOSS DOWN 回报（`enemy.isBoss` 对两者均为真）。
+
+**接入要点**：Enemy 构造 `isBoss = 'boss'||'bossCaster'`、`bossKind`、`cast` 状态；armor 分支
+含 cast；render 分支含 cast；AI 特殊技按 bossKind 分流（`_startCast/_progressCast/_castRelease`）；
+`_spawnBoss` 真实 boss 波按奇偶选、越波调用默认 slammer（向后兼容）；`_bossEnrage` 按
+`ENRAGE_SUMMONS_KIND[bossKind]` 选召唤物；HUD/遥测加 bossKind/name + counts/spawned 加
+bossCaster；新增 `__test.spawnBossKind/bossFireSpecial` 钩子。
+
+**验证**：新增 `tests/bossvariety.spec.js` 4/4（wave5=slammer/wave10=caster、caster 弹幕生成
+投掷物、caster 狂暴召唤 leaper、caster 击杀触发 BOSS DOWN 回报+血包），注册 `bossvariety`
+project。回归修复：重构初版让越波 `spawnBoss()` 钩子误选 caster（wave1→bossIndex0 偶），破坏
+slammer 冲击波测试；改为"真实 boss 波按奇偶、越波默认 slammer"后，官方 CI 5/5 + boss 3/3 全绿。
+
+**趣味评估**：两 Boss 形成不同节奏的剪刀石头布——slammer=读条跳冲击波、caster=读条躲弹幕+
+近身惩罚。仍是代理指标；下轮候选=第三 Boss（冲锋型）或把 Boss 模组化（随机附加词缀）。
+
 
 

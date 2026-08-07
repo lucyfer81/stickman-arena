@@ -262,3 +262,105 @@ must:
 - Be observable for tests via `window.__stickman.music`.
 
 This is then iterated: fix -> test -> write a second batch of reviews -> repeat.
+
+---
+
+# Round 2 — post-music-fix reviews (the soundtrack shipped)
+
+After the generative soundtrack shipped, a new wave of reviews comes in. The
+"no music" complaints vanish; the distribution reshuffles. Here are 12 new
+reviews reflecting the post-fix state.
+
+## Positive (post-fix)
+
+**P1.** "Okay they added MUSIC and it's actually good?? The boss wave goes hard,
+the Second Wind part gets this desperate tense track, and it actually changes
+with what's happening. Huge upgrade, bumped to Recommended." *(music, boss)*
+
+**P2.** "The Oracle boss at wave 10 caught me off guard — I prepped to jump
+shockwaves and instead got a spread of green projectiles. Different fight
+entirely. MORE OF THIS." *(boss variety)*
+
+**P3.** "Music reacting to the broken state is chef's kiss. Single arm, tense
+beat, 1 HP, go. Cinematic for a stickman game." *(music, second wind)*
+
+**P4.** "Glad the boss name shows on the HP bar now — THE SLAMMER / THE ORACLE.
+Small touch, makes it feel like actual bosses." *(boss, polish)*
+
+## Negative (post-fix)
+
+**N1.** "Music is fixed, nice. But honestly my real issue stands: it's still
+thin. After wave 12 you've seen every enemy and both bosses and it loops. Needs
+more content or a reason to keep going." *[REPETITIVE / THIN]*
+
+**N2.** "Two bosses is a start but I fought the Oracle THREE times by wave 30.
+Still repeats. Give me 4-5 bosses, or procedural boss mods." *[ONE BOSS /
+REPETITIVE]*
+
+**N3.** "Can't rebind keys. J/K hurts my hand after a session and there's no
+options menu. On PC this is table stakes." *[NO REMAP]*
+
+**N4.** "Normal difficulty: first 4 waves are trivial, then the boss can spike
+you. No smooth ramp. Either I'm bored or I'm suddenly fighting for my life." *[DIFFICULTY]*
+
+**N5.** "Screen shake with no toggle — my friend got nauseous in 5 minutes.
+Accessibility option please." *[SHAKE TOGGLE]*
+
+**N6.** "Mobile: punch/kick buttons still overlap my palm in landscape and
+there's no haptics so taps feel lost." *[MOBILE]*
+
+**N7.** "I didn't understand Second Wind until my 3rd death. Arm falls off, 1 HP,
+weird timer — tell me what's happening." *[ONBOARDING]*
+
+**N8.** "The bomber chain-reaction trivializes big waves. Bait one into the pack
+and the wave kills itself. Feels like an exploit." *[BALANCE]*
+
+## Round-2 complaint tally (12 reviews)
+
+| # | Cluster | Mentions |
+|---|---|---|
+| **1** | **Repetitive / thin content (incl. boss repetition)** | **4** (N1, N2, + P2/P4 want more) |
+| 2 | No key rebinding | 1 (N3) — but a "table stakes" PC complaint, recurring across forums |
+| 3 | Difficulty ramp | 1 (N4) |
+| 4 | Screen-shake toggle (accessibility) | 1 (N5) |
+| 5 | Mobile controls | 1 (N6) |
+| 6 | Second Wind onboarding | 1 (N7) |
+| 7 | Balance (bomber friendly fire) | 1 (N8) |
+
+### Verdict (Round 2)
+The dominant post-fix complaint is **repetition / "only bosses repeat"** — the
+same structural issue that motivated Round 3's boss work, now resurfacing because
+players reach wave 10+ and re-meet the same two bosses. The highest-impact,
+most-enjoyable fix is **boss variety**: ship a second, mechanically distinct
+boss so boss waves alternate. This directly serves both "repetitive" and "one
+boss" and reuses all existing boss infrastructure (HP bar, enrage, kill payoff,
+projectile pool).
+
+### Root cause
+`_spawnBoss` always constructed `new Enemy(..., 'boss')` — one archetype, one
+attack (the ground-slam). There was no second boss data set, no special-attack
+branch, and `isBoss` was gated to the single `'boss'` variant.
+
+### Fix (Round 2, shipped)
+- **"The Oracle" caster boss** (`VARIANTS.bossCaster`): toxic-green, 1.45x,
+  200hp. Its special is a **telegraphed lobbed projectile barrage** (3 shots,
+  5 when enraged) reusing the ranger projectile pool — counter is to
+  move/jump and punish the recover window. Distinct from the slammer's
+  must-jump shockwaves.
+- **Alternation**: real boss waves now alternate — wave 5/15/25 = slammer,
+  wave 10/20/30 = caster. The wave banner + HP-bar label show the name.
+- **Variant-aware enrage**: the caster summons **leapers** (anti-air, to punish
+  jump-dodging the barrage) instead of the slammer's grunts.
+- Shared infra unchanged: both bosses use the same HP bar, enrage, super-armor,
+  and BOSS DOWN payoff (`enemy.isBoss` is true for both). `spawnEnemyProjectile`
+  gained an optional damage override so the caster reuses the ranger arc.
+
+### Verification (Round 2)
+- New `tests/bossvariety.spec.js` 4/4: wave-5=slammer/wave-10=caster; caster
+  barrage spawns projectiles; caster enrage summons leapers; caster kill fires
+  the BOSS DOWN payoff + heal drop.
+- Regression: official CI 5/5, `boss` (slammer) 3/3 — the refactor that broke
+  the slammer-shockwave test (out-of-context `spawnBoss()` picking the caster)
+  was fixed by defaulting off-context spawns to the slammer while real boss
+  waves alternate.
+

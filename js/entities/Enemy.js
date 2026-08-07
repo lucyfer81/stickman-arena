@@ -57,6 +57,14 @@ const VARIANTS = {
     palette: { limb: 0xff3b30, joint: 0xffb4a8, head: 0xffe0d8, accent: 0xffd23f, fist: 0xff8a3d },
     health: 220, speed: 95, damage: 18, scale: 1.6, score: 1500, attackReach: 120,
   },
+  bossCaster: {
+    // Boss variant B ("The Oracle"): a ranged caster that alternates with the
+    // slammer on even boss-index waves. Its special is a telegraphed lobbed
+    // projectile barrage (dodge by moving/jumping) instead of a ground-slam.
+    // Shares the HP bar / enrage / kill-payoff infra; `isBoss` is true for both.
+    palette: { limb: 0x9aff6b, joint: 0xc6ffae, head: 0xe6ffd2, accent: 0x16c45a, fist: 0xeaf4ff },
+    health: 200, speed: 108, damage: 16, scale: 1.45, score: 1500, attackReach: 110,
+  },
 };
 
 export class Enemy extends Stickman {
@@ -89,10 +97,13 @@ export class Enemy extends Stickman {
     this.aggrMul = 1;     // wave-dependent aggression (lower recover/cooldown)
     this.flankDir = 1;    // desired side relative to player (+1 right / -1 left)
     // boss-only state
-    this.isBoss = variant === 'boss';
+    this.isBoss = variant === 'boss' || variant === 'bossCaster';
+    this.bossKind = variant === 'bossCaster' ? 'caster' : 'slammer';
     this.enraged = false;
-    this.slam = null;     // { phase: 'windup'|'leap'|'recover', t }
+    this.slam = null;     // { phase: 'windup'|'leap'|'recover', t } (slammer)
+    this.cast = null;     // { phase: 'windup'|'recover', t } (caster barrage)
     this.slamCd = this.isBoss ? 2.0 : 0;  // first slam after a brief grace
+    this.castCd = this.isBoss ? 2.2 : 0;  // first barrage after a brief grace
     // shielder guard state — down for GUARD_BREAK_TIME after a heavy hit lands
     this.guardBroken = 0;
     // bomber fuse state — { t } once close enough; detonates at FUSE_TIME
@@ -150,10 +161,14 @@ export class Enemy extends Stickman {
       this.state = 'hurt'; this.hurtTime = 0;
       return true;
     }
-    // BOSS SLAM super-armor: once the boss commits to a slam (past windup), it
-    // cannot be interrupted by anything short of death. The telegraphed counter
-    // is to JUMP the shockwave, not to stagger the dive.
+    // BOSS super-armor: once a boss commits to its special (past the telegraph
+    // windup), it cannot be interrupted by anything short of death. For the
+    // slammer that's the leap+recover; for the caster, the barrage release+
+    // recover. The telegraphed counter is to dodge the attack, not stagger it.
     if (this.isBoss && this.slam && this.slam.phase !== 'windup') {
+      return true;
+    }
+    if (this.isBoss && this.cast && this.cast.phase !== 'windup') {
       return true;
     }
     if (phase === 'windup' || phase === 'active') {
@@ -287,6 +302,15 @@ export class Enemy extends Stickman {
       return;
     }
 
+    // CASTER BOSS barrage: like the slam, it takes over the full body once
+    // committed (windup -> release -> recover). Progress it before melee AI.
+    if (this.cast) {
+      this._progressCast(dt, player);
+      this._physics(dt);
+      this._render();
+      return;
+    }
+
     // BOMBER fuse: once lit (started in AI below), it runs to completion and
     // detonates — takes priority over a normal melee swing, like the boss slam.
     if (this.fuse) {
@@ -335,15 +359,26 @@ export class Enemy extends Stickman {
     // leaper commits from farther out (it dives to close the gap)
     const commitRange = reach * (this.variant === 'leaper' ? 1.15 : 0.82);
 
-    // BOSS: periodic ground-slam special — the dramatic, must-be-jumped attack
-    // that radiates shockwaves. Takes priority over a normal melee swing.
+    // BOSS: periodic special attack — the dramatic, must-be-dodged move. The
+    // slammer ground-slams (shockwaves you jump); the caster fires a lobbed
+    // projectile barrage (you move/jump). Takes priority over a normal swing.
     if (this.isBoss) {
-      this.slamCd -= dt;
-      if (this.onGround && this.slamCd <= 0 && dist < 760) {
-        this._startSlam();
-        this._physics(dt);
-        this._render();
-        return;
+      if (this.bossKind === 'caster') {
+        this.castCd -= dt;
+        if (this.onGround && this.castCd <= 0 && dist < CONFIG.BOSS.CAST.RANGE) {
+          this._startCast();
+          this._physics(dt);
+          this._render();
+          return;
+        }
+      } else {
+        this.slamCd -= dt;
+        if (this.onGround && this.slamCd <= 0 && dist < 760) {
+          this._startSlam();
+          this._physics(dt);
+          this._render();
+          return;
+        }
       }
     }
 
@@ -537,6 +572,61 @@ export class Enemy extends Stickman {
     scene.audio && scene.audio.bigHit();
   }
 
+  // ---- caster boss projectile barrage ----
+  // A telegraphed cast (glow ramps for CAST.WINDUP) then a spread of lobbed
+  // projectiles arcing toward the player's standoff — dodgeable by moving or
+  // jumping, unlike the slam's must-jump shockwaves. Reuses the scene's ranger
+  // projectile pool (gravity arc + collision + draw) for free.
+  _startCast() {
+    this.cast = { phase: 'windup', t: 0 };
+    this.glow = 0;
+    this.state = 'idle';
+  }
+
+  _progressCast(dt, player) {
+    const a = this.cast;
+    const C = CONFIG.BOSS.CAST;
+    a.t += dt;
+    if (a.phase === 'windup') {
+      // TELEGRAPH: glow ramps to full + face the player so the barrage reads.
+      this.facing = sign(player.x - this.x) || this.facing;
+      this.glow = clamp01(a.t / C.WINDUP);
+      this.vx *= clamp01(1 - 8 * dt);
+      if (a.t >= C.WINDUP) {
+        this._castRelease(player);
+        a.phase = 'recover'; a.t = 0; this.glow = 0.3;
+      }
+      return;
+    }
+    // recover: a long, stationary vulnerable window — the punish for dodging
+    // the barrage. Shorter window than the slammer's to offset the cast safety.
+    this.vx *= clamp01(1 - 10 * dt);
+    if (a.t >= C.RECOVER) {
+      this.cast = null;
+      this.castCd = this.enraged ? C.INTERVAL_ENRAGED : C.INTERVAL;
+      this.glow = 0;
+      this.state = 'idle';
+    }
+  }
+
+  _castRelease(player) {
+    const C = CONFIG.BOSS.CAST;
+    const scene = this.scene;
+    const y0 = this.y - 96 * this.scale;       // cast from head height
+    const shots = this.enraged ? C.SHOTS_ENRAGED : C.SHOTS;
+    for (let i = 0; i < shots; i++) {
+      const off = shots === 1 ? 0 : (i / (shots - 1) - 0.5) * 2 * C.SPREAD;
+      const tx = clamp(player.x + off, CONFIG.WALL_LEFT + 20, CONFIG.WALL_RIGHT - 20);
+      scene.spawnEnemyProjectile(this.x, y0, tx, CONFIG.GROUND_Y - 40, C.PROJECTILE_DMG);
+    }
+    // cast feedback: a charging ring + recoil zoom + flash. Tinted toxic-green
+    // to match the caster palette so the source of the barrage reads clearly.
+    if (scene._impactRing) scene._impactRing(this.x, y0, 0x9aff6b, scene._ringSpec ? scene._ringSpec('HEAVY') : { life: 0.28, maxR: 66, width: 5 });
+    if (scene._punchZoom) scene._punchZoom(CONFIG.FEEL.ZOOM.HEAVY, 0, 0);
+    scene.cameras.main.shake(120, 0.012);
+    scene.audio && scene.audio.bigHit && scene.audio.bigHit();
+  }
+
   _enrage() {
     this.enraged = true;
     this.speedMul *= 1.25;
@@ -612,6 +702,11 @@ export class Enemy extends Stickman {
       // tuck, recover as settling idle — so each phase is instantly legible.
       if (this.slam.phase === 'leap') anim = { state: 'jump', vy: -this.vy };
       else if (this.slam.phase === 'windup') anim = { state: 'punch', phase: 0.18 };
+      else anim = { state: 'idle', time: this.animTime };
+    } else if (this.cast) {
+      // caster barrage: windup reads as a charging cast (both arms forward),
+      // recover as a vulnerable idle. The glowing fist carries the telegraph.
+      if (this.cast.phase === 'windup') anim = { state: 'punch', phase: 0.3 };
       else anim = { state: 'idle', time: this.animTime };
     } else if (this.attack && this.attack.leap) {
       // a diving leaper reads as an airborne tuck, not a grounded punch

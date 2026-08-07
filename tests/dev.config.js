@@ -29,6 +29,7 @@ module.exports = defineConfig({
   use: { baseURL: 'http://localhost:8080' },
   projects: [
     project('boss',        /boss\.spec\.js/,        120000),
+    project('bossvariety', /bossvariety\.spec\.js/, 120000),
     project('depth',       /depth\.spec\.js/,        90000),
     project('combo',       /combo\.spec\.js/,        90000),
     project('diag',        /diagnostic\.spec\.js/,  300000),
