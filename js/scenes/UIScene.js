@@ -347,6 +347,35 @@ export class UIScene extends Phaser.Scene {
       this._rageLabel.setAlpha(0);
     }
 
+    // SECOND WIND — a prominent draining timer bar while in the broken window.
+    // Placed bottom-centre so it reads as a desperate countdown, not a stat.
+    if (hud.broken) {
+      const bw = 520, bhb = 18;
+      const bxx = CONFIG.WIDTH / 2 - bw / 2, byy = CONFIG.HEIGHT - 64;
+      const frac = clamp((hud.brokenT || 0) / (hud.brokenMax || 1), 0, 1);
+      const danger = frac < 0.33;
+      const pulse = 0.7 + 0.3 * Math.sin(this.time.now * (danger ? 0.025 : 0.012));
+      g.fillStyle(0x000000, 0.6);
+      g.fillRoundedRect(bxx - 4, byy - 4, bw + 8, bhb + 8, 6);
+      g.fillStyle(0x1a0608, 0.95);
+      g.fillRoundedRect(bxx, byy, bw, bhb, 5);
+      const bcol = danger ? 0xff3b30 : 0xff6f5c;
+      g.fillStyle(bcol, pulse);
+      g.fillRoundedRect(bxx, byy, Math.max(0, bw * frac), bhb, 5);
+      g.lineStyle(2, 0xffd23f, 0.8);
+      g.strokeRoundedRect(bxx, byy, bw, bhb, 5);
+      if (!this._brokenLabel) {
+        this._brokenLabel = this.add.text(CONFIG.WIDTH / 2, byy + bhb / 2, 'SECOND WIND', {
+          fontFamily: 'Arial Black', fontSize: '12px', color: '#ffffff',
+          stroke: '#0b1a2a', strokeThickness: 4,
+        }).setOrigin(0.5).setDepth(101);
+      }
+      this._brokenLabel.setVisible(true);
+      this._brokenLabel.setText(danger ? 'SECOND WIND \u2014 RISE!' : 'SECOND WIND');
+    } else if (this._brokenLabel) {
+      this._brokenLabel.setVisible(false);
+    }
+
     this.scoreText.setText(String(hud.score));
     this.waveText.setText('WAVE ' + hud.wave);
     this.enemyText.setText(hud.enemiesLeft > 0 ? (hud.enemiesLeft + ' left') : '');

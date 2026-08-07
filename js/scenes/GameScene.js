@@ -19,6 +19,8 @@ export class GameScene extends Phaser.Scene {
     this.fxLayer = this.add.graphics().setDepth(20); // hit sparks drawn direct
     this.ringLayer = this.add.graphics().setDepth(21); // expanding impact rings
     this.shockLayer = this.add.graphics().setDepth(19); // boss ground-slam shockwaves
+    this.debrisLayer = this.add.graphics().setDepth(9); // SECOND WIND shattered-limb props
+    this.veilLayer = this.add.graphics().setDepth(220); // SECOND WIND monochrome/red vignette
     this.fireLayer = this.add.graphics().setDepth(18); // ground fire (bomber/meteor)
     this.projLayer = this.add.graphics().setDepth(20); // ranger projectiles + meteor markers
     this.enemies = [];
@@ -27,6 +29,7 @@ export class GameScene extends Phaser.Scene {
     this.hazards = [];        // ground fire zones { x, w, life, t, tick, dps }
     this.projectiles = [];    // ranger lobbed projectiles
     this.meteorWarnings = []; // telegraph markers before a meteor impact
+    this.debris = [];          // SECOND WIND: shattered limb props (arm ragdoll)
     this.rings = [];          // expanding impact rings { x, y, t, life, maxR, width, color }
     this.camBoost = 0;        // punch-zoom boost (zoom = 1 + boost); decays each frame
     this.camShoveX = 0;       // directional camera recoil (px), eased back to 0
@@ -110,7 +113,7 @@ export class GameScene extends Phaser.Scene {
         despawnEnemies: () => { for (const e of this.enemies) if (!e.dead) { e.dead = true; e.destroy(); } },
         // skip straight to a boss wave (default wave 5) so boss logic can be
         // exercised without playing through 4 normal waves.
-        gotoBossWave: (n) => { for (const e of this.enemies) e.destroy(); this.enemies = []; this.boss = null; this.shockwaves = []; this.hazards = []; this.projectiles = []; this.meteorWarnings = []; this.startWave(n || CONFIG.BOSS.WAVE_EVERY); },
+        gotoBossWave: (n) => { for (const e of this.enemies) e.destroy(); this.enemies = []; this.boss = null; this.shockwaves = []; this.hazards = []; this.projectiles = []; this.meteorWarnings = []; this.debris = []; this.startWave(n || CONFIG.BOSS.WAVE_EVERY); },
         spawnBoss: () => { this._spawnBoss(); },
         setBossHp: (n) => { if (this.boss && !this.boss.dead) { this.boss.health = n; } },
         // route a lethal player strike through the real combat pipeline so the
@@ -169,6 +172,11 @@ export class GameScene extends Phaser.Scene {
         spawnFireZone: (x, opts) => this.spawnFireZone(x, opts),
         spawnProjectileAt: (x0, y0, x1, y1) => this.spawnEnemyProjectile(x0, y0, x1, y1),
         detonateAt: (x) => this._detonateBomber({ x, y: CONFIG.GROUND_Y }),
+        // SECOND WIND: force-enter the broken last-stand, force a reform, and
+        // fast-forward the window's timer so the expiry path is testable.
+        enterSecondWind: () => { if (!this.player.broken && !this.player.dead) { this.player._enterBroken(); return true; } return false; },
+        reform: () => { if (this.player.broken) { this._reform(); return true; } return false; },
+        fastForwardBroken: (t) => { if (this.player.broken) this.player.brokenT = (t != null ? t : 0.2); },
         playerState: () => ({
           state: this.player.state,
           attackType: this.player.attack ? this.player.attack.type : null,
@@ -177,7 +185,7 @@ export class GameScene extends Phaser.Scene {
           total: this.player.attack ? this.player.attack.total : null,
           connected: this.player.attack ? this.player.attack.connected : null,
         }),
-        clearEnemies: () => { for (const e of this.enemies) if (!e.dead) { e.dead = true; e.destroy(); } this.enemies = []; this.boss = null; this.shockwaves = []; this.hazards = []; this.projectiles = []; this.meteorWarnings = []; this.spawnQueue = 0; this.waveActive = false; },
+        clearEnemies: () => { for (const e of this.enemies) if (!e.dead) { e.dead = true; e.destroy(); } this.enemies = []; this.boss = null; this.shockwaves = []; this.hazards = []; this.projectiles = []; this.meteorWarnings = []; this.debris = []; this.spawnQueue = 0; this.waveActive = false; },
       };
     }
 
@@ -750,6 +758,131 @@ export class GameScene extends Phaser.Scene {
     this.ui.floatText('SUPPLY!', cx, 160, '#35e1ff', 26);
   }
 
+  // ---- SECOND WIND ("The Broken") ----
+  // Fires once per run when the player takes lethal damage: instead of dying,
+  // they shatter into a 1-HP last stand. This method is the shatter payoff —
+  // visuals + a guaranteed heal lifeline so reform is always POSSIBLE (skill,
+  // not RNG) while still demanding a kill-or-chase under pressure.
+  _onEnterBroken() {
+    const L = CONFIG.LASTSTAND;
+    const p = this.player;
+    const F = CONFIG.FEEL;
+    // SHATTER feedback: the strongest "you almost died" beat in the game.
+    this.slowmo = Math.max(this.slowmo, 0.45);
+    this.hitPause = Math.max(this.hitPause, 0.16);
+    this._impactRing(p.x, p.y - 80, 0xff3b30, this._ringSpec('BOSS_KILL'));
+    this._impactRing(p.x, p.y - 80, 0xffffff, this._ringSpec('HURT'));
+    this._punchZoom(F.ZOOM.BOSS_KILL, 0, F.SHOVE.DOWN);
+    this.cameras.main.shake(320, 0.028);
+    this.burst(p.x, p.y - 70, 0xff3b30, 50);
+    this.burst(p.x, p.y - 70, 0xeaf4ff, 26);
+    // spawn the detached right arm as a short-lived physics prop
+    this.debris.push({
+      x: p.x + p.facing * 14, y: p.y - 96, vx: -p.facing * 220 + rand(-60, 60),
+      vy: -340, rot: rand(-0.5, 0.5), vr: rand(-9, 9), t: 0, life: 5.0,
+      onGround: false, len: 64,
+    });
+    // guaranteed lifeline: a health drop falls near the player so reform is
+    // never purely RNG-gated. Place it offset so the player must commit.
+    const lx = clamp(p.x + rand(-150, 150), CONFIG.WALL_LEFT + 50, CONFIG.WALL_RIGHT - 50);
+    this.pickups.push(new Pickup(this, lx, 80, 'health', { drop: true }));
+    this.ui.banner('SECOND WIND!', '#ff3b30');
+    this.ui.floatText('SHATTERED', p.x, p.y - 200, '#ff3b30', 34);
+    this.audio && this.audio.gameover && this.audio.bigHit && this.audio.bigHit();
+  }
+
+  // REFORM: called from the health-pickup path while broken. Snaps the arm back
+  // (render reads broken=false), restores HP, fires the survival climax.
+  _reform() {
+    const L = CONFIG.LASTSTAND;
+    const p = this.player;
+    const F = CONFIG.FEEL;
+    p.broken = false;
+    p.brokenT = 0;
+    p.invuln = Math.max(p.invuln, 0.8);
+    p.health = Math.max(1, Math.round(p.maxHealth * L.REFORM_HP_FRAC));
+    const bonus = Math.round(L.REFORM_SCORE_BONUS * this._scoreMul());
+    this.score += bonus;
+    this.healed += p.health;
+    // climax: golden flood — the arm returns, colour washes back, big payoff.
+    this.slowmo = Math.max(this.slowmo, L.REFORM_SLOWMO);
+    this.hitPause = Math.max(this.hitPause, 0.12);
+    this._impactRing(p.x, p.y - 80, 0xffd23f, this._ringSpec('BOSS_KILL'));
+    this._impactRing(p.x, p.y - 80, 0x6bff9e, this._ringSpec('KILL'));
+    this._punchZoom(F.ZOOM.BOSS_KILL, 0, 0);
+    this.cameras.main.shake(260, 0.02);
+    this.burst(p.x, p.y - 70, 0xffd23f, 56);
+    this.burst(p.x, p.y - 70, 0x6bff9e, 30);
+    this.ui.banner('REFORMED!  +' + bonus, '#6bff9e');
+    this.ui.floatText('REFORMED!', p.x, p.y - 200, '#6bff9e', 36);
+    this.audio && this.audio.combo && this.audio.combo(16);
+  }
+
+  // shatter-prop physics + draw (a detached stickman arm = two line segments)
+  _updateDebris(dt) {
+    const g = this.debrisLayer;
+    g.clear();
+    for (const d of this.debris) {
+      d.t += dt;
+      d.life -= dt;
+      if (!d.onGround) {
+        d.vy += CONFIG.GRAVITY * dt;
+        d.x += d.vx * dt;
+        d.y += d.vy * dt;
+        d.rot += d.vr * dt;
+        if (d.y >= CONFIG.GROUND_Y - 4) {
+          d.y = CONFIG.GROUND_Y - 4; d.vy = 0; d.vx *= 0.4; d.vr *= 0.3;
+          if (Math.abs(d.vx) < 6) { d.onGround = true; d.vx = 0; d.vr = 0; }
+        }
+        if (d.x < CONFIG.WALL_LEFT) { d.x = CONFIG.WALL_LEFT; d.vx *= -0.4; }
+        if (d.x > CONFIG.WALL_RIGHT) { d.x = CONFIG.WALL_RIGHT; d.vx *= -0.4; }
+      }
+      // fade out in the last second
+      const fade = d.life < 1 ? Math.max(0, d.life) : 1;
+      // draw a two-segment arm pivoting at d.rot
+      const ux = Math.cos(d.rot), uy = Math.sin(d.rot);
+      const hx = d.x, hy = d.y - d.len * 0.5;
+      const ex = d.x + ux * d.len * 0.5, ey = hy + uy * d.len * 0.5 + d.len * 0.5;
+      g.lineStyle(8, 0x05070d, fade);
+      g.lineBetween(hx, hy, ex, ey);
+      g.lineBetween(ex, ey, ex + ux * d.len * 0.4, ey + uy * d.len * 0.4 + d.len * 0.3);
+      g.lineStyle(6, 0xeaf4ff, fade);
+      g.lineBetween(hx, hy, ex, ey);
+      g.lineBetween(ex, ey, ex + ux * d.len * 0.4, ey + uy * d.len * 0.4 + d.len * 0.3);
+      g.fillStyle(0xbfe3ff, fade);
+      g.fillCircle(hx, hy, 4); g.fillCircle(ex, ey, 4);
+    }
+    this.debris = this.debris.filter((d) => d.life > 0);
+  }
+
+  // monochrome + red-edge vignette while in the broken window (depth above all)
+  _updateVeil(dt) {
+    const g = this.veilLayer;
+    g.clear();
+    const p = this.player;
+    if (!p.broken) return;
+    const L = CONFIG.LASTSTAND;
+    // intensity ramps: snap to full on entry, pulse with the heartbeat, fade as
+    // the window closes so the final second reads as desperate.
+    const frac = clamp(p.brokenT / L.DURATION, 0, 1);
+    const pulse = 0.85 + 0.15 * Math.sin(this.time.now * 0.012);
+    const edge = (0.55 + 0.35 * (1 - frac)) * pulse;
+    // full-screen dark wash (the desaturate analogue for procedural art)
+    g.fillStyle(0x0b0e16, 0.45 * edge);
+    g.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
+    // red inner vignette ring
+    const cx = CONFIG.WIDTH / 2, cy = CONFIG.HEIGHT / 2;
+    const steps = 6;
+    for (let i = 0; i < steps; i++) {
+      const t = i / steps;
+      g.lineStyle(60 + t * 120, 0xff3b30, 0.04 * edge * (1 - t));
+      g.strokeRect(-120 + t * 60, -120 + t * 60, CONFIG.WIDTH + 240 - t * 120, CONFIG.HEIGHT + 240 - t * 120);
+    }
+    // heartbeat throb at the screen centre (a soft red disc behind the player)
+    g.fillStyle(0xff3b30, 0.05 * edge * pulse);
+    g.fillCircle(cx, cy, 240 + 40 * pulse);
+  }
+
   // ---- combat ----
   _resolveCombat() {
     const p = this.player;
@@ -757,11 +890,13 @@ export class GameScene extends Phaser.Scene {
     // player -> enemies
     const phb = p.getHitbox();
     if (phb) {
-      // RAGE: a active rage buff amplifies the player's outgoing damage. Compose
+      // RAGE + SECOND WIND: both amplify the player's outgoing damage. Compose
       // an effective hitbox so the kill-prediction + takeHit both see the boost.
       const rageMul = this.rageT > 0 ? CONFIG.CONTENT.PICKUP.RAGE_DMG_MUL : 1;
-      const dmg = Math.round(phb.dmg * rageMul);
-      const eff = (rageMul === 1) ? phb : { x: phb.x, y: phb.y, w: phb.w, h: phb.h, swing: phb.swing, dmg, kb: phb.kb, pause: phb.pause, from: phb.from };
+      const brokenMul = this.player.broken ? CONFIG.LASTSTAND.DMG_MUL : 1;
+      const outMul = rageMul * brokenMul;
+      const dmg = Math.round(phb.dmg * outMul);
+      const eff = (outMul === 1) ? phb : { x: phb.x, y: phb.y, w: phb.w, h: phb.h, swing: phb.swing, dmg, kb: phb.kb, pause: phb.pause, from: phb.from };
       for (const e of this.enemies) {
         if (e.dead || e.lastSwing === p.swingId) continue;
         if (aabb(eff, e.bodyBox())) {
@@ -832,6 +967,16 @@ export class GameScene extends Phaser.Scene {
     this._checkComboTier();
     if (killed) {
       this.kills++;
+      // SECOND WIND: a kill during the broken window is a lifeline — extend the
+      // timer and roll a health drop so reform stays within reach.
+      if (this.player.broken) {
+        const L = CONFIG.LASTSTAND;
+        this.player.brokenT = Math.min(this.player.brokenT + L.KILL_TIME_BONUS, this.player.brokenMax + 3);
+        this.ui.floatText('+' + (L.KILL_TIME_BONUS.toFixed(1)) + 's', enemy.x, enemy.y - 170 * enemy.scale, '#ff3b30', 20);
+        if (enemy.variant !== 'bomber' && Math.random() < L.KILL_HEAL_CHANCE) {
+          this.pickups.push(new Pickup(this, enemy.x, enemy.y - 60, 'health'));
+        }
+      }
       // a kill always carries a touch more hitstop for the "finishing" weight.
       this.hitPause = Math.max(this.hitPause, hb.pause + F.PAUSE.KILL);
       // RETENTION: FIRST BLOOD — celebrate the run's first (non-boss) kill with a
@@ -1059,12 +1204,17 @@ export class GameScene extends Phaser.Scene {
       p.update(stepDt, this.player);
       if (p._collected) {
         if (p.type === 'health') {
-          const heal = 25;
-          this.player.health = Math.min(this.player.maxHealth, this.player.health + heal);
-          this.healed += heal;
-          this.burst(this.player.x, this.player.y - 60, 0x35e1ff, 16);
-          this.audio && this.audio.combo(8);
-          this.ui.floatText('+' + heal + ' HP', this.player.x, this.player.y - 160, '#35e1ff', 22);
+          // SECOND WIND: grabbing health while broken REFORMS — the run survives.
+          if (this.player.broken) {
+            this._reform();
+          } else {
+            const heal = 25;
+            this.player.health = Math.min(this.player.maxHealth, this.player.health + heal);
+            this.healed += heal;
+            this.burst(this.player.x, this.player.y - 60, 0x35e1ff, 16);
+            this.audio && this.audio.combo(8);
+            this.ui.floatText('+' + heal + ' HP', this.player.x, this.player.y - 160, '#35e1ff', 22);
+          }
         } else if (p.type === 'rage') {
           this._startRage(CONFIG.CONTENT.PICKUP.RAGE_TIME);
           this.ui.banner('RAGE!', '#ff8a3d');
@@ -1086,6 +1236,8 @@ export class GameScene extends Phaser.Scene {
     this._updateHazards(stepDt);
     this._updateProjectiles(stepDt);
     this._updateMeteors(stepDt);
+    this._updateDebris(dt);   // real-time: the shatter prop fades regardless of slow-mo
+    this._updateVeil(dt);
 
     // rage buff timer
     if (this.rageT > 0) {
@@ -1146,6 +1298,7 @@ export class GameScene extends Phaser.Scene {
       boss: bossAlive ? { hp: this.boss.health, maxHp: this.boss.maxHealth, enraged: this.boss.enraged } : null,
       rage: Math.max(0, this.rageT), rageMax: this.rageMax,
       event: this.activeEvent,
+      broken: this.player.broken, brokenT: this.player.brokenT, brokenMax: this.player.brokenMax,
     });
     if (typeof window !== 'undefined') {
       window.__stickman = {
@@ -1178,6 +1331,12 @@ export class GameScene extends Phaser.Scene {
         meteors: this.meteorWarnings.length,
         rage: Math.max(0, this.rageT),
         event: this.activeEvent,
+        // SECOND WIND telemetry
+        broken: this.player.broken,
+        brokenT: this.player.brokenT,
+        brokenMax: this.player.brokenMax,
+        secondWindUsed: this.player.secondWindUsed,
+        reformed: !this.player.broken && this.player.secondWindUsed,
       };
     }
   }

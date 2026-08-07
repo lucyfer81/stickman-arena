@@ -84,6 +84,25 @@ export const CONFIG = {
     VANGUARD_WAVE: 2,
   },
 
+  // ---- SECOND WIND ("The Broken") — surprising comeback mechanic ----
+  // Once per run, lethal damage (0 HP) does NOT end the game. The stickman
+  // shatters (right arm detaches + screen desaturates) and enters a short,
+  // high-risk window: 1 HP, double damage, faster. Kill to extend / drop
+  // heals; reach a health pickup to REFORM and keep the run alive. Rarity
+  // (once per run) keeps it a memorable story, not a crutch.
+  LASTSTAND: {
+    DURATION: 6.0,            // seconds in the broken window
+    KILL_TIME_BONUS: 1.2,     // seconds added per kill during broken
+    KILL_HEAL_CHANCE: 0.55,   // chance a broken-window kill drops health
+    DMG_MUL: 2.0,             // outgoing damage multiplier while broken
+    SPEED_MUL: 1.3,           // move-speed multiplier while broken
+    ENTRY_INVULN: 1.0,        // brief i-frames on shatter so the killing blow
+                              // doesn't instantly re-kill at 1 HP
+    REFORM_HP_FRAC: 0.40,     // HP fraction restored on a successful reform
+    REFORM_SCORE_BONUS: 750,  // score reward for pulling off a reform
+    REFORM_SLOWMO: 0.35,      // slow-mo seconds on the reform climax
+  },
+
   // Boss waves — every BOSS_WAVE_EVERY-th wave spawns a single elite boss
   // with a telegraphed ground-slam that emits shockwaves the player must jump.
   BOSS: {

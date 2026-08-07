@@ -22,6 +22,12 @@ export class Player extends Stickman {
     this.jumpCut = false;
     this.dead = false;
     this.deadT = 0;
+    // SECOND WIND: once-per-run broken state. `broken` is active during the
+    // last-stand window; `secondWindUsed` gates it to a single occurrence.
+    this.broken = false;
+    this.brokenT = 0;
+    this.brokenMax = 1;
+    this.secondWindUsed = false;
   }
 
   setPalette(p) { this.palette = p; }
@@ -72,7 +78,14 @@ export class Player extends Stickman {
     this.vy = -260;
     this.onGround = false;
     if (this.health <= 0) {
-      this.die();
+      // SECOND WIND: the first lethal blow shatters the stickman into a
+      // 1-HP last stand instead of ending the run. The scene owns the
+      // enter/reform/expire choreography; we just flip state + stay alive.
+      if (!this.secondWindUsed && !this.broken) {
+        this._enterBroken();
+      } else {
+        this.die();
+      }
     } else {
       this.state = 'hurt';
       this.hurtTime = 0;
@@ -80,6 +93,22 @@ export class Player extends Stickman {
       this.scene.audio && this.scene.audio.playerHurt();
     }
     return true;
+  }
+
+  // Enter the broken last-stand: clamp to 1 HP, grant entry i-frames, arm the
+  // timer. The scene hooks _onEnterBroken/_onReform for feedback + HUD.
+  _enterBroken() {
+    const L = CONFIG.LASTSTAND;
+    this.broken = true;
+    this.secondWindUsed = true;
+    this.health = 1;
+    this.brokenMax = L.DURATION;
+    this.brokenT = L.DURATION;
+    this.invuln = L.ENTRY_INVULN;
+    this.attack = null;
+    this.state = 'idle';
+    this.scene.audio && this.scene.audio.bigHit && this.scene.audio.bigHit();
+    if (this.scene._onEnterBroken) this.scene._onEnterBroken();
   }
 
   die() {
@@ -105,6 +134,15 @@ export class Player extends Stickman {
   update(dt, input) {
     this.animTime += dt;
     if (this.invuln > 0) this.invuln -= dt;
+
+    // SECOND WIND: tick the broken-window timer. Running out = real death.
+    if (this.broken && !this.dead) {
+      this.brokenT -= dt;
+      if (this.brokenT <= 0) {
+        this.brokenT = 0;
+        this.die();
+      }
+    }
 
     if (this.dead) {
       this.deadT += dt / 0.7;
@@ -154,11 +192,14 @@ export class Player extends Stickman {
 
     // ---- normal control ----
     // horizontal
-    const target = input.dir * CONFIG.PLAYER.SPEED;
+    // SECOND WIND: the broken last-stand pumps move speed so a 1-HP player
+    // can actually chase a heal drop or escape pressure.
+    const speedMul = this.broken ? CONFIG.LASTSTAND.SPEED_MUL : 1;
+    const target = input.dir * CONFIG.PLAYER.SPEED * speedMul;
     const accel = this.onGround ? CONFIG.PLAYER.ACCEL : CONFIG.PLAYER.AIR_ACCEL;
     if (input.dir !== 0) {
       this.vx += (target - this.vx) * clamp01(accel * dt / Math.max(1, Math.abs(target - this.vx)));
-      this.vx = clamp(this.vx, -CONFIG.PLAYER.SPEED, CONFIG.PLAYER.SPEED);
+      this.vx = clamp(this.vx, -CONFIG.PLAYER.SPEED * speedMul, CONFIG.PLAYER.SPEED * speedMul);
       this.facing = input.dir;
     } else {
       const fr = CONFIG.PLAYER.FRICTION * dt;
@@ -258,6 +299,10 @@ export class Player extends Stickman {
     } else if (!this.dead) {
       this._alpha = 1;
     }
+    // SECOND WIND: while broken, the right arm is gone (it shattered off) and
+    // the body reads cracked/red-rimmed. We signal the arm loss via a limb
+    // mask on the pose so the base renderer skips those segments.
+    this.limbMask = this.broken ? { dropRightArm: true } : null;
     this.render(anim);
   }
 
