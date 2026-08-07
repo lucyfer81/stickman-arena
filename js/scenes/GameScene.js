@@ -37,9 +37,11 @@ export class GameScene extends Phaser.Scene {
     this.hitsTaken = 0;
     this.healed = 0;
     this.kills = 0;
-    this.spawned = { grunt: 0, runner: 0, brute: 0, leaper: 0 };
+    this.spawned = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0 };
     this.tierBonuses = 0;
-    this.onboard = { move: false, jump: false, punch: false, kick: false, t: 0 };
+    this.firstBloodDone = false;     // FIRST BLOOD fires once on the run's first non-boss kill
+    this.waveFirstSpawn = true;      // wave-2 first spawn is a vanguard mini-elite
+    this.onboard = { move: false, jump: false, punch: false, kick: false, firstHit: false, t: 0 };
 
     // difficulty preset (chosen on the title screen; persists)
     const diffKey = this.registry.get('difficulty') || 'normal';
@@ -102,6 +104,17 @@ export class GameScene extends Phaser.Scene {
           const hb = { dmg: 9999, kb: 560, pause: 0.18, from: this.player.x };
           b.takeHit(9999, this.player.x, 560, 0.18);
           if (b.dead) this._onPlayerHit(b, hb, true);
+        },
+        // route a lethal player strike on the first living non-boss enemy through
+        // the real combat pipeline so FIRST BLOOD (and normal K.O. feedback) fires
+        // exactly as in play. Mirrors killBoss for determinism in tests.
+        killFirstEnemy: () => {
+          const e = this.enemies.find((x) => !x.dead && !x.isBoss);
+          if (!e) return false;
+          const hb = { dmg: 9999, kb: 320, pause: 0.055, from: this.player.x };
+          e.takeHit(9999, this.player.x, 320, 0.055);
+          if (e.dead) this._onPlayerHit(e, hb, true);
+          return true;
         },
         // combat-depth probes: read first living enemy's HP, spawn a grunt at a
         // fixed offset from the player, and snapshot player attack state.
@@ -214,7 +227,8 @@ export class GameScene extends Phaser.Scene {
       this.spawnQueue = count;
       this.ui.banner('WAVE ' + n, n === 1 ? '#35e1ff' : '#ffd23f');
     }
-    this.spawnTimer = 0.3;
+    this.spawnTimer = (n === 1) ? CONFIG.RETENTION.WAVE1_FIRST_SPAWN : 0.3;
+    this.waveFirstSpawn = true;
     this.audio && this.audio.wave(n);
   }
 
@@ -222,12 +236,26 @@ export class GameScene extends Phaser.Scene {
     if (this.isBossWave) return this._spawnBoss();
     const n = this.wave;
     let variant = 'grunt';
-    const r = Math.random();
-    if (n >= 4 && r < 0.18) variant = 'leaper';
-    else if (n >= 3 && r < 0.40) variant = 'brute';
-    else if (n >= 2 && r < 0.62) variant = 'runner';
+    // RETENTION: wave 2 opens with a vanguard mini-elite — one early "duel"
+    // climax inside the first minute. Only the first spawn of that wave.
+    if (this.waveFirstSpawn && n === CONFIG.RETENTION.VANGUARD_WAVE) {
+      variant = 'vanguard';
+    } else {
+      const r = Math.random();
+      if (n >= 4 && r < 0.18) variant = 'leaper';
+      else if (n >= 3 && r < 0.40) variant = 'brute';
+      else if (n >= 2 && r < 0.62) variant = 'runner';
+    }
+    this.waveFirstSpawn = false;
     const fromLeft = Math.random() < 0.5;
-    const x = fromLeft ? CONFIG.WALL_LEFT + 10 : CONFIG.WALL_RIGHT - 10;
+    // RETENTION: early waves spawn on an inner band (closer to mid) instead of
+    // the walls, cutting the ~3.2s "walk-up" dead time to ~1.5s. Wave 4+ still
+    // spawns at the walls so late-game pressure comes from the edges as before.
+    const early = n <= CONFIG.RETENTION.INNER_SPAWN_WAVES;
+    const x = early
+      ? (fromLeft ? CONFIG.WALL_LEFT + CONFIG.RETENTION.INNER_SPAWN_OFFSET
+                  : CONFIG.WALL_RIGHT - CONFIG.RETENTION.INNER_SPAWN_OFFSET)
+      : (fromLeft ? CONFIG.WALL_LEFT + 10 : CONFIG.WALL_RIGHT - 10);
     const e = new Enemy(this, x, CONFIG.GROUND_Y, variant);
     e.facing = fromLeft ? 1 : -1;
     if (this.spawned && this.spawned[variant] != null) this.spawned[variant]++;
@@ -248,7 +276,11 @@ export class GameScene extends Phaser.Scene {
     // preset + daily modifier multiply on top so the whole curve shifts.
     e.speedMul = (1 + Math.min(n, 15) * 0.045) * m.enemySpeed;
     e.hpMul = (1 + Math.min(n, 15) * 0.075) * m.enemyHp;
-    e.aggrMul = (0.8 + Math.min(n - 1, 8) * 0.07) * m.aggr; // wave1 gentle, wave9+ fierce
+    // RETENTION: floor early-wave aggression so the first minute has stakes — a
+    // passive/casual player now takes a few hits instead of none. The floor only
+    // lifts waves 1-3 (the curve exceeds it after); hardcore can still dodge.
+    const aggrCurve = 0.8 + Math.min(n - 1, 8) * 0.07;
+    e.aggrMul = Math.max(CONFIG.RETENTION.EARLY_AGR_FLOOR, aggrCurve) * m.aggr;
     e.dmgMul = m.enemyDmg;
     e.health = e.maxHealth = e.maxHealth * e.hpMul;
   }
@@ -374,6 +406,9 @@ export class GameScene extends Phaser.Scene {
     this.combo++;
     this.bestCombo = Math.max(this.bestCombo, this.combo);
     this.comboTimer = CONFIG.COMBO_WINDOW;
+    // RETENTION: first time the player damages an enemy — drives the teaching
+    // callouts (hide the pre-contact pointer once they've actually landed a hit).
+    if (!this.onboard.firstHit) this.onboard.firstHit = true;
     const mult = 1 + Math.floor((this.combo - 1) / 4) * 0.5;
     const gain = Math.round(10 * mult * this.mods.scoreMul);
     this.score += gain;
@@ -391,6 +426,18 @@ export class GameScene extends Phaser.Scene {
     this._checkComboTier();
     if (killed) {
       this.kills++;
+      // RETENTION: FIRST BLOOD — celebrate the run's first (non-boss) kill with a
+      // bigger slow-mo + banner. It lands ~3-5s in: the cheapest possible memory
+      // peak during the most churn-prone moment. Fires once; boss kills have
+      // their own climax and are excluded.
+      if (!this.firstBloodDone && !enemy.isBoss) {
+        this.firstBloodDone = true;
+        this.slowmo = Math.max(this.slowmo, CONFIG.RETENTION.FIRST_BLOOD_SLOWMO);
+        this.hitPause = Math.max(this.hitPause, CONFIG.RETENTION.FIRST_BLOOD_PAUSE);
+        this.cameras.main.shake(190, 0.016);
+        this.ui.banner('FIRST BLOOD!', '#ff8a3d');
+        this.ui.floatText('FIRST BLOOD!', this.player.x, this.player.y - 220, '#ff8a3d', 30);
+      }
       // BOSS payoff: a climactic moment — long slow-mo, big shake, banner,
       // guaranteed heal drop, huge score. Worth the climb.
       if (enemy.isBoss) {
@@ -524,13 +571,21 @@ export class GameScene extends Phaser.Scene {
         if (this.spawnTimer <= 0 && aliveNow < CONFIG.ENEMY.MAX_ALIVE) {
           this.spawnOne();
           this.spawnQueue--;
-          this.spawnTimer = rand(0.3, 0.65);
+          // RETENTION: tighter spawn cadence early so the action stays dense in
+          // the first minute (was a flat 0.3-0.65 for all waves).
+          const gap = (this.wave <= CONFIG.RETENTION.INNER_SPAWN_WAVES)
+            ? CONFIG.RETENTION.EARLY_SPAWN_GAP : CONFIG.RETENTION.LATE_SPAWN_GAP;
+          this.spawnTimer = rand(gap[0], gap[1]);
         }
       } else {
         const alive = this.enemies.filter((e) => !e.dead).length;
         if (alive === 0) {
           this.waveActive = false;
-          this.waveBreak = 1.1;
+          // RETENTION: shorter between-wave gap in the first few waves so the
+          // first minute keeps momentum (1.1s -> 0.7s); late waves keep the
+          // breathing room.
+          this.waveBreak = (this.wave <= CONFIG.RETENTION.EARLY_WAVE_BREAK_WAVES)
+            ? CONFIG.RETENTION.EARLY_WAVE_BREAK : CONFIG.RETENTION.LATE_WAVE_BREAK;
           this.score += Math.round(100 * this.wave * this.mods.scoreMul);
           this.ui.banner('WAVE CLEAR  +' + Math.round(100 * this.wave * this.mods.scoreMul), '#6bff9e');
         }
@@ -594,7 +649,7 @@ export class GameScene extends Phaser.Scene {
 
   _updateHUD() {
     const alive = this.enemies.filter((e) => !e.dead);
-    const counts = { grunt: 0, runner: 0, brute: 0, leaper: 0, boss: 0 };
+    const counts = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0, boss: 0 };
     for (const e of alive) if (counts[e.variant] != null) counts[e.variant]++;
     // boss HP for the top-of-screen bar (null when no boss is alive)
     const bossAlive = this.boss && !this.boss.dead ? this.boss : null;
@@ -630,6 +685,7 @@ export class GameScene extends Phaser.Scene {
         bossEnraged: bossAlive ? bossAlive.enraged : false,
         shockwaves: this.shockwaves.length,
         pickups: this.pickups.length,
+        firstBlood: this.firstBloodDone,
       };
     }
   }

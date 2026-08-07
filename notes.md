@@ -171,3 +171,14 @@ Boss 解决了"峰值"，但**普通波战斗仍单调**——踢全程碾压拳
 
 红线：boss 仍 wave5；难度/skins/daily 逻辑不改。新增 `tests/retention.spec.js`。
 本环境无浏览器系统库跑不了 `npm test`，已按构造保证不破坏现有断言。
+
+**实现完成**：6 文件改动，全部 `node --check` (ESM) 通过。
+- `config.js`：新增 `RETENTION` 调参块。
+- `Enemy.js`：新变体 `vanguard`（金、1.25×、50hp、score 300）。
+- `Meta.js`：`nextUnlock(stats)`（按 ember→toxic→gold→royal 返回首个未解锁+进度）+ `dailyModifierTomorrow()`。
+- `GameScene.js`：wave1–3 内移带出生/早波波间 0.7s/早波出生间隔 (0.22,0.45)/wave1 首敌 0.15s；aggrMul 早波 floor 0.95；首杀 FIRST BLOOD；wave2 首刷 vanguard；`onboard.firstHit`；`spawned/counts` 加 vanguard；遥测加 `firstBlood`；新增 `__test.killFirstEnemy` 钩子。
+- `UIScene.js`：teach 层（首敌头顶箭头 J/PUNCH、残血 K/KICK、AFK 兜底大字，touch/desktop 自适应，限 wave≤2 且首命中前）+ HUD 目标条（`Meta.nextUnlock`，随波次刷新）。
+- `GameOverScene.js`：结算页加"下一解锁进度"与"明日 daily"两行（放 yy 统计列，避开尸体）。
+- 测试：`tests/retention.spec.js`（5 用例：内移带/墙边、vanguard 仅 wave2 首刷、FIRST BLOOD 仅一次、nextUnlock+明日、teach/goal/结算 smoke），并在 `tests/dev.config.js` 注册 `retention` project。CI `npm test`（core/mobile）不受影响。
+
+验证缺口（需你环境补跑）：`npx playwright test --config=tests/dev.config.js`（retention + 全部 dev 套件）与 `npm test`（官方 5/5）。

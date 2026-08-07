@@ -1,5 +1,6 @@
 import { CONFIG } from '../config.js';
 import { clamp } from '../utils/math.js';
+import { Meta } from '../systems/Meta.js';
 
 export class UIScene extends Phaser.Scene {
   constructor() { super('UI'); }
@@ -37,6 +38,8 @@ export class UIScene extends Phaser.Scene {
     this._buildPauseButton();
     this._buildMute();
     this._buildOnboarding();
+    this._buildTeach();
+    this._buildGoalChip();
 
     this.floats = [];
     this._touchVisible = false;
@@ -374,6 +377,8 @@ export class UIScene extends Phaser.Scene {
     }
 
     this._updateOnboarding(dt);
+    this._updateTeachHints(dt);
+    this._refreshGoalChip();
   }
 
   _updateOnboarding(dt) {
@@ -396,5 +401,107 @@ export class UIScene extends Phaser.Scene {
       chip.key.setAlpha(a);
       chip.label.setAlpha(a);
     }
+  }
+
+  // ---- teaching hints (retention) ----
+  // The static chips just label keys; these callouts POINT at the moment of need:
+  // a pre-contact pointer at the approaching enemy, a finisher hint on a
+  // one-shot enemy, and an AFK lifeline if the player freezes. Desktop shows the
+  // key letter, touch shows the action word. Gated to early waves + pre-first-hit.
+  _buildTeach() {
+    this._teachCloseT = 0;
+    this.teachPointer = this.add.text(0, 0, '', {
+      fontFamily: 'Arial Black', fontSize: '20px', color: '#ffd23f',
+      stroke: '#0b1a2a', strokeThickness: 5,
+    }).setOrigin(0.5).setDepth(160).setAlpha(0);
+    this.teachFinisher = this.add.text(0, 0, '', {
+      fontFamily: 'Arial Black', fontSize: '20px', color: '#ff6f5c',
+      stroke: '#0b1a2a', strokeThickness: 5,
+    }).setOrigin(0.5).setDepth(160).setAlpha(0);
+    this.teachAfk = this.add.text(CONFIG.WIDTH / 2, CONFIG.HEIGHT / 2 + 120, '', {
+      fontFamily: 'Arial Black', fontSize: '30px', color: '#ffd23f',
+      stroke: '#0b1a2a', strokeThickness: 6,
+    }).setOrigin(0.5).setDepth(161).setAlpha(0);
+  }
+
+  _updateTeachHints(dt) {
+    const gs = this.gameScene;
+    const pointer = this.teachPointer, finisher = this.teachFinisher, afk = this.teachAfk;
+    if (!gs || gs.gameOver || gs.paused) {
+      pointer.setAlpha(0); finisher.setAlpha(0); afk.setAlpha(0); return;
+    }
+    const ob = gs.onboard;
+    const R = CONFIG.RETENTION;
+    const early = gs.wave <= R.TEACH_WAVES;
+    // read touch flag live (refreshTouchVisibility maintains it, incl. on resize)
+    const touch = !!this._touchVisible;
+    const label = touch
+      ? { punch: 'PUNCH', kick: 'KICK' }
+      : { punch: 'J', kick: 'K' };
+
+    // find nearest living non-boss enemy (the teaching target)
+    let near = null, nd = 1e9, finisherTarget = null;
+    const kickDmg = CONFIG.PLAYER.KICK.DAMAGE;
+    for (const e of gs.enemies) {
+      if (e.dead || e.isBoss) continue;
+      const d = Math.abs(e.x - gs.player.x);
+      if (d < nd) { nd = d; near = e; }
+      if (early && e.health > 0 && e.health <= kickDmg && !finisherTarget) finisherTarget = e;
+    }
+
+    // FINISHER hint takes precedence over the approach pointer (same enemy slot)
+    let showFinisher = false;
+    if (early && finisherTarget && !(gs.player.attack && gs.player.attack.type === 'kick')) {
+      showFinisher = true;
+      finisher.setText('\u25BC ' + label.kick);
+      finisher.setPosition(finisherTarget.x, finisherTarget.y - 156);
+    }
+
+    // APPROACH pointer: pre-first-contact, point at the incoming enemy
+    let showPointer = false;
+    if (early && !showFinisher && !ob.firstHit && near && nd < R.TEACH_APPROACH_DIST && nd > R.TEACH_AFK_DIST) {
+      showPointer = true;
+      pointer.setText('\u25BC ' + label.punch);
+      pointer.setPosition(near.x, near.y - 172);
+    }
+
+    // AFK lifeline: enemy is on the player and no attack pressed for a beat
+    let showAfk = false;
+    if (gs.wave === 1 && !ob.punch && !ob.kick && near && nd < R.TEACH_AFK_DIST) {
+      this._teachCloseT += dt;
+      if (this._teachCloseT > R.TEACH_AFK_GRACE) {
+        showAfk = true;
+        afk.setText(touch ? 'TAP  PUNCH  TO  FIGHT!' : 'PRESS  J  TO  FIGHT!');
+      }
+    } else {
+      this._teachCloseT = 0;
+    }
+
+    const pulse = 0.6 + 0.4 * Math.sin((ob.t || 0) * 7);
+    pointer.setAlpha(showPointer ? pulse : 0);
+    finisher.setAlpha(showFinisher ? pulse : 0);
+    afk.setAlpha(showAfk ? pulse : 0);
+  }
+
+  // ---- in-run goal chip (retention: surface meta-progression during play) ----
+  _buildGoalChip() {
+    this.goalText = this.add.text(CONFIG.WIDTH / 2, CONFIG.HEIGHT - 104, '', {
+      fontFamily: 'Arial', fontSize: '13px', color: '#7fb6d6',
+    }).setOrigin(0.5).setDepth(101).setAlpha(0);
+    this._goalWave = -1;
+    this._goalKey = null;
+  }
+
+  _refreshGoalChip() {
+    const gs = this.gameScene;
+    if (!gs) return;
+    // recompute only when the wave changes (cheap; stats that move mid-run —
+    // bestWave/combo — only help, never lock, so a stale "next" is still correct)
+    if (gs.wave === this._goalWave) return;
+    this._goalWave = gs.wave;
+    const goal = Meta.nextUnlock();
+    if (!goal) { this.goalText.setAlpha(0); return; }
+    this.goalText.setText('NEXT  \u2192  ' + goal.text + '  \u00B7  ' + goal.skinLabel + ' skin');
+    this.goalText.setAlpha(0.8);
   }
 }

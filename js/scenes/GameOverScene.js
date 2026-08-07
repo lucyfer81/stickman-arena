@@ -69,6 +69,23 @@ export class GameOverScene extends Phaser.Scene {
       yy += 36;
     }
 
+    // RETENTION: give a reason to come back. Surface the next unlock's progress
+    // (a near-term goal) and tomorrow's daily modifier (a D1 return hook). Placed
+    // in the stats column (yy) so they don't overlap the dead-stickman at center.
+    const goal = Meta.nextUnlock(stats);
+    if (goal) {
+      this.add.text(cx, yy + 18,
+        goal.current + ' / ' + goal.target + '  \u2192  ' + goal.skinLabel + ' skin', {
+          fontFamily: 'Arial', fontSize: '15px', color: '#35e1ff',
+        }).setOrigin(0.5);
+      yy += 26;
+    }
+    const tom = Meta.dailyModifierTomorrow();
+    this.add.text(cx, yy + 14,
+      'come back tomorrow: ' + tom.name + ' \u2014 ' + tom.desc, {
+        fontFamily: 'Arial', fontSize: '13px', color: '#6c8aa0',
+      }).setOrigin(0.5);
+
     // persistent career line
     this.add.text(cx, CONFIG.HEIGHT - 150,
       'career: ' + stats.totalKills + ' kills  \u00B7  ' + stats.gamesPlayed + ' runs  \u00B7  best wave ' + stats.bestWave + '  \u00B7  hi ' + hs, {

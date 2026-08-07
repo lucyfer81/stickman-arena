@@ -105,6 +105,40 @@ export const Meta = {
   },
   skinPalette(key) { return this.skinDef(key || this.getSkin()).palette; },
 
+  // Next locked skin in display order, with a short requirement + progress for
+  // the in-run HUD goal chip and the game-over nudge. Returns null when all
+  // skins are unlocked. Surfaces long-term progression DURING the first minute
+  // (the moment of max churn), where it was previously invisible.
+  nextUnlock(stats) {
+    stats = stats || this.loadStats();
+    const ORDER = ['ember', 'toxic', 'gold', 'royal'];
+    for (const key of ORDER) {
+      if (this.isSkinUnlocked(key, stats)) continue;
+      const u = SKINS[key].unlock;
+      let current = 0, text = '';
+      switch (u.type) {
+        case 'wave':  current = stats.bestWave;   text = 'reach wave ' + u.value; break;
+        case 'kills': current = stats.totalKills; text = u.value + ' kills'; break;
+        case 'combo': current = stats.bestCombo;  text = 'x' + u.value + ' combo'; break;
+        case 'score': current = stats.bestScore;  text = 'score ' + u.value; break;
+        default: continue;
+      }
+      return {
+        key, skinLabel: SKINS[key].label,
+        current: Math.min(current, u.value), target: u.value, text,
+        pct: Math.max(0, Math.min(1, current / u.value)),
+      };
+    }
+    return null;
+  },
+
+  // tomorrow's daily modifier — used by the game-over "come back tomorrow" nudge.
+  dailyModifierTomorrow() {
+    const t = new Date();
+    t.setDate(t.getDate() + 1);
+    return this.dailyModifier(t);
+  },
+
   // ---- daily challenge ----
   // a date key + a deterministic modifier chosen from the date. The run itself
   // uses normal RNG; the modifier is the daily hook (same for everyone today).

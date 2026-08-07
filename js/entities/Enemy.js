@@ -23,6 +23,14 @@ const VARIANTS = {
     palette: { limb: 0xffb02e, joint: 0xffd98a, head: 0xffeec0, accent: 0xff7a00, fist: 0xffe26b },
     health: 24, speed: 195, damage: 13, scale: 0.96, score: 220, attackReach: 96,
   },
+  vanguard: {
+    // early-game mini-elite (retention): one spawns as wave 2's first enemy to
+    // give a short 6-8s "duel" climax inside the first minute, before the wave-5
+    // boss. Tougher/grittier than a grunt but not a boss — beats the "first
+    // minute is the least exciting part" churn point.
+    palette: { limb: 0xffd23f, joint: 0xffea99, head: 0xfff5cc, accent: 0xff9b00, fist: 0xffffff },
+    health: 50, speed: 132, damage: 11, scale: 1.25, score: 300, attackReach: 86,
+  },
   boss: {
     // elite climactic enemy for boss waves (every 5th wave). Big, tough, and
     // performs a telegraphed ground-slam whose shockwaves must be jumped.

@@ -58,6 +58,32 @@ export const CONFIG = {
   COMBO_TIERS: [5, 10, 15, 20, 30],   // milestone combos -> bonus + banner
   COMBO_TIER_BONUS: 100,              // flat score bonus per milestone
 
+  // First-minute retention tuning. Goal: cut the opening "dead time" (enemies
+  // walking in from the walls), give a teachable first contact, and surface a
+  // goal — without touching the wave-5 boss or the difficulty/skins systems.
+  RETENTION: {
+    // waves where spawns appear on an inner band (closer to mid) instead of walls
+    INNER_SPAWN_WAVES: 3,
+    INNER_SPAWN_OFFSET: 300,      // px in from each wall during early waves
+    EARLY_WAVE_BREAK: 0.7,        // between-wave gap for early waves (was 1.1)
+    EARLY_WAVE_BREAK_WAVES: 3,
+    LATE_WAVE_BREAK: 1.1,
+    EARLY_SPAWN_GAP: [0.22, 0.45],// gap between spawns in early waves (was 0.3-0.65)
+    LATE_SPAWN_GAP: [0.30, 0.65],
+    WAVE1_FIRST_SPAWN: 0.15,      // spawnTimer at wave-1 start (was 0.3)
+    EARLY_AGR_FLOOR: 0.95,        // aggrMul floor for early waves (was 0.8)
+    // teaching hints (UIScene) — gated to early waves so they don't clutter
+    TEACH_WAVES: 2,
+    TEACH_APPROACH_DIST: 260,     // show pre-contact pointer when nearest enemy within this
+    TEACH_AFK_DIST: 110,          // "enemy is on you" threshold for the AFK lifeline
+    TEACH_AFK_GRACE: 1.6,         // seconds at close range with no attack before lifeline fires
+    // FIRST BLOOD — celebrate the run's first (non-boss) kill
+    FIRST_BLOOD_SLOWMO: 0.30,
+    FIRST_BLOOD_PAUSE: 0.12,
+    // vanguard mini-elite — one early duel, wave 2 first spawn only
+    VANGUARD_WAVE: 2,
+  },
+
   // Boss waves — every BOSS_WAVE_EVERY-th wave spawns a single elite boss
   // with a telegraphed ground-slam that emits shockwaves the player must jump.
   BOSS: {
