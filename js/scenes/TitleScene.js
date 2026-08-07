@@ -17,11 +17,18 @@ export class TitleScene extends Phaser.Scene {
 
     const cx = CONFIG.WIDTH / 2;
 
-    // demo stickman
-    this.demo = new Stickman(this, cx - 220, CONFIG.GROUND_Y, COLORS.player);
+    // ---- centred "VS" stage: two stickmen squared off under a spotlight ----
+    // Was a single left-aligned demo + a wide void on the right, which left the
+    // title's middle band empty and the composition lopsided. A centred duel
+    // (the game's namesake) balances the frame and shows the promise of the
+    // game — a stickman arena fight — right on the cover.
+    this._buildSpotlight(cx);
+    const off = 150;
+    this.demo = new Stickman(this, cx - off, CONFIG.GROUND_Y, COLORS.player);
     this.demo.facing = 1;
+    this.enemyDemo = new Stickman(this, cx + off, CONFIG.GROUND_Y, COLORS.enemy);
+    this.enemyDemo.facing = -1;
     this.t = 0;
-    this.demoAction = 0;
 
     // difficulty (persists) — guarded: Safari private mode can throw on access
     let storedDiff = 'normal';
@@ -35,7 +42,7 @@ export class TitleScene extends Phaser.Scene {
     this.dailyOn = false;
 
     // title
-    const title = this.add.text(cx, 170, 'STICKMAN ARENA', {
+    const title = this.add.text(cx, 150, 'STICKMAN ARENA', {
       fontFamily: 'Impact, Arial Black, sans-serif',
       fontSize: '96px',
       color: '#eaf4ff',
@@ -44,31 +51,31 @@ export class TitleScene extends Phaser.Scene {
     }).setOrigin(0.5);
     title.setShadow(0, 6, '#0b1a2a', 12, true, true);
 
-    this.add.text(cx, 246, 'a tiny stickman brawler', {
+    this.add.text(cx, 220, 'a tiny stickman brawler', {
       fontFamily: 'Arial',
       fontSize: '24px',
       color: '#7fb6d6',
     }).setOrigin(0.5);
 
     // difficulty selector — click to cycle Easy -> Normal -> Hard
-    this.diffLabel = this.add.text(cx - 150, CONFIG.HEIGHT - 200, '', {
+    this.diffLabel = this.add.text(cx - 150, 364, '', {
       fontFamily: 'Arial Black', fontSize: '20px', color: '#ffffff',
       stroke: '#0b1a2a', strokeThickness: 5,
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
     this._refreshDiff();
-    this.diffRect = new Phaser.Geom.Rectangle(cx - 150 - 120, CONFIG.HEIGHT - 200 - 24, 240, 48);
+    this.diffRect = new Phaser.Geom.Rectangle(cx - 150 - 120, 364 - 24, 240, 48);
     this.diffLabel.on('pointerdown', (pointer, localX, localY, event) => {
       event && event.stopPropagation();
       this._cycleDiff();
     });
 
     // skin selector — cycle unlocked palettes
-    this.skinLabel = this.add.text(cx + 150, CONFIG.HEIGHT - 200, '', {
+    this.skinLabel = this.add.text(cx + 150, 364, '', {
       fontFamily: 'Arial Black', fontSize: '20px', color: '#ffffff',
       stroke: '#0b1a2a', strokeThickness: 5,
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
     this._refreshSkin();
-    this.skinRect = new Phaser.Geom.Rectangle(cx + 150 - 120, CONFIG.HEIGHT - 200 - 24, 240, 48);
+    this.skinRect = new Phaser.Geom.Rectangle(cx + 150 - 120, 364 - 24, 240, 48);
     this.skinLabel.on('pointerdown', (pointer, localX, localY, event) => {
       event && event.stopPropagation();
       this._cycleSkin();
@@ -77,11 +84,11 @@ export class TitleScene extends Phaser.Scene {
     // daily challenge toggle — fixed modifier for today, separate best
     const dm = Meta.dailyModifier();
     const db = Meta.dailyBest();
-    this.dailyLabel = this.add.text(cx, CONFIG.HEIGHT - 258, '', {
+    this.dailyLabel = this.add.text(cx, 320, '', {
       fontFamily: 'Arial Black', fontSize: '16px', color: '#9bb4c8',
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
     this._refreshDaily(dm, db);
-    this.dailyRect = new Phaser.Geom.Rectangle(cx - 320, CONFIG.HEIGHT - 258 - 18, 640, 36);
+    this.dailyRect = new Phaser.Geom.Rectangle(cx - 320, 320 - 18, 640, 36);
     this.dailyLabel.on('pointerdown', (pointer, localX, localY, event) => {
       event && event.stopPropagation();
       this.dailyOn = !this.dailyOn;
@@ -90,19 +97,22 @@ export class TitleScene extends Phaser.Scene {
       this.audio && this.audio.ui();
     });
 
-    this.subtitle = this.add.text(cx, CONFIG.HEIGHT - 150, 'PRESS  SPACE  /  TAP  TO  START', {
+    this.subtitle = this.add.text(cx, 458, 'PRESS  SPACE  /  TAP  TO  START', {
       fontFamily: 'Arial Black',
-      fontSize: '30px',
+      fontSize: '34px',
       color: '#ffd23f',
+      stroke: '#0b1a2a',
+      strokeThickness: 6,
     }).setOrigin(0.5);
+    this.subtitle.setShadow(0, 3, '#000', 8, true, true);
 
-    this.add.text(cx, CONFIG.HEIGHT - 96, 'A / \u2190  D / \u2192  move    W / SPACE  jump    J  punch    K  kick', {
+    this.add.text(cx, 672, 'A / \u2190  D / \u2192  move    W / SPACE  jump    J  punch    K  kick', {
       fontFamily: 'Arial',
       fontSize: '20px',
       color: '#9bb4c8',
     }).setOrigin(0.5);
 
-    this.add.text(cx, CONFIG.HEIGHT - 64, 'on mobile: use the on-screen joystick & buttons', {
+    this.add.text(cx, 698, 'on mobile: use the on-screen joystick & buttons', {
       fontFamily: 'Arial',
       fontSize: '16px',
       color: '#6c8aa0',
@@ -113,7 +123,7 @@ export class TitleScene extends Phaser.Scene {
     try { hsRaw = localStorage.getItem('stickman_arena_hs') || '0'; } catch (e) {}
     const hs = parseInt(hsRaw, 10);
     if (hs > 0) {
-      this.add.text(cx, 300, 'BEST  ' + hs, {
+      this.add.text(cx, 276, 'BEST  ' + hs, {
         fontFamily: 'Arial Black', fontSize: '26px', color: '#35e1ff',
       }).setOrigin(0.5);
     }
@@ -187,6 +197,34 @@ export class TitleScene extends Phaser.Scene {
     this.dailyLabel.setColor(this.dailyOn ? '#ffd23f' : '#7fb6d6');
   }
 
+  // Soft stage spotlight: a cone of cyan light from above widening to a bright
+  // pool on the arena floor. Anchors the centre of the title (filling the old
+  // dead middle band) and lights the VS duel. The cone originates BELOW the
+  // menu text so selectors stay on a clean plate; only the CTA + fighters are
+  // lit. Additive + low alpha = atmosphere, never competing with UI.
+  _buildSpotlight(cx) {
+    const g = this.add.graphics().setDepth(-30).setBlendMode(Phaser.BlendModes.ADD);
+    const topY = 392, topHalf = 40;
+    const botY = CONFIG.GROUND_Y, botHalf = 250;
+    for (let i = 5; i >= 1; i--) {
+      const k = i / 5;
+      g.fillStyle(0x35e1ff, 0.022 * (6 - i));
+      g.beginPath();
+      g.moveTo(cx - topHalf * (1 + k), topY);
+      g.lineTo(cx + topHalf * (1 + k), topY);
+      g.lineTo(cx + botHalf * (1 + k * 0.5), botY);
+      g.lineTo(cx - botHalf * (1 + k * 0.5), botY);
+      g.closePath();
+      g.fillPath();
+    }
+    for (let i = 4; i >= 1; i--) {
+      g.fillStyle(0x35e1ff, 0.045 * (5 - i));
+      g.fillEllipse(cx, botY + 8, 420 * (i / 4), 70 * (i / 4));
+    }
+    g.fillStyle(0xbfeeff, 0.10);
+    g.fillEllipse(cx, botY + 6, 180, 40);
+  }
+
   start() {
     if (this.starting) return;
     this.starting = true;
@@ -200,22 +238,24 @@ export class TitleScene extends Phaser.Scene {
   update(_t, dtMs) {
     const dt = dtMs / 1000;
     this.t += dt;
-    this.demoAction -= dt;
-    if (this.demoAction <= 0) {
-      this.demoAction = 1.6 + Math.random() * 1.5;
-      this.demoPunch = !this.demoPunch;
-    }
-    // wave: occasional punch
-    let anim;
-    const cycle = (this.t % 3.2);
-    if (cycle > 2.6 && cycle < 3.1) {
-      anim = { state: 'punch', phase: (cycle - 2.6) / 0.5 };
-      this.demo.glow = 1;
+    // Alternating sparring loop: every `round` seconds one fighter throws a
+    // punch at the other — depicts a live standoff instead of a static pose.
+    const round = 3.4;
+    const cycle = this.t % round;
+    const playerAttacks = Math.floor(this.t / round) % 2 === 0;
+    const punchStart = 2.5, punchEnd = 3.05;
+    let pAnim = { state: 'idle', time: this.t };
+    let eAnim = { state: 'idle', time: this.t };
+    if (cycle > punchStart && cycle < punchEnd) {
+      const phase = (cycle - punchStart) / (punchEnd - punchStart);
+      if (playerAttacks) { pAnim = { state: 'punch', phase }; this.demo.glow = 1; }
+      else { eAnim = { state: 'punch', phase }; this.enemyDemo.glow = 1; }
     } else {
       this.demo.glow = 0;
-      anim = { state: 'idle', time: this.t };
+      this.enemyDemo.glow = 0;
     }
-    this.demo.render(anim);
+    this.demo.render(pAnim);
+    this.enemyDemo.render(eAnim);
     this.subtitle.setAlpha(0.55 + 0.45 * (0.5 + 0.5 * Math.sin(this.t * 4)));
   }
 }
