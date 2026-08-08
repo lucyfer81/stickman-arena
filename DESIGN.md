@@ -255,4 +255,39 @@ the tab." 3/10 · terrible (D1 churn).
 1 (resource loop / pickup magnet) → 2 (first-time assist) → 4 (early threat) →
 3 (mobile chaining) → iterate.
 
+### Fix #1 — resource loop (pickup magnet) — SHIPPED
+
+**Root cause (source-verified):** health/rage pickups spawn on the corpse with a
+42px collect radius, no magnet, 9s life. Telemetry proved nobody ever collected
+one (healed:0 for all four personas), so the resource loop never engaged and
+Second Wind's reform path was effectively unreachable in real play.
+
+**Fix (`Pickup.js` + `config.js`):** a sticky **magnet** — once the player is
+within `MAGNET_RANGE` (150px) the pickup locks on and steers its velocity
+straight toward the player (`MAGNET_SPEED` 760, `MAGNET_STEER` 22/s), killing the
+spawn-pop instantly so it zips in. Steering (not additive accel) is what makes
+the lock-on feel snappy. The homing flag is sticky so it never flickers at the
+range edge, and it lifts a grounded drop back off the floor. Latent telemetry
+bug also fixed: `_reform()` now sets `player.reformed = true` (the flag was read
+but never written).
+
+**Verification:**
+- New `tests/magnet.spec.js` 3/3 — in-range drop is collected (+HP, healed>0);
+  out-of-range drop stays put (no arena-wide vacuum); broken player collects →
+  reforms.
+- Official CI 5/5 green; `laststand` 4/4 green (touched `_reform`).
+- **Real-play proof (casual persona, same script, before → after):**
+
+| Metric | Before | After |
+|---|---|---|
+| End HP | 18 (near death) | **74** (healthy) |
+| Healed | **0** | **25** |
+| Score | 2915 | **4135** (+42%) |
+| Best combo | 9 | **13** |
+| Kills | 9 | **12** |
+| Rage collected | 0s | **7.3s** (magnet hits all pickup types) |
+
+The casual player no longer bleeds out unfairly — they heal, survive, and engage
+with more of the game. #7 (unfair near-death) is resolved as a symptom of #1.
+
 

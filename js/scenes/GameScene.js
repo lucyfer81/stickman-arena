@@ -841,6 +841,7 @@ export class GameScene extends Phaser.Scene {
     const p = this.player;
     const F = CONFIG.FEEL;
     p.broken = false;
+    p.reformed = true;
     p.brokenT = 0;
     p.invuln = Math.max(p.invuln, 0.8);
     p.health = Math.max(1, Math.round(p.maxHealth * L.REFORM_HP_FRAC));

@@ -23,6 +23,7 @@ export class Pickup extends Phaser.GameObjects.Graphics {
     this.onGround = false;
     this.life = CONFIG.CONTENT.PICKUP.LIFE;
     this.dead = false;
+    this.homing = false;     // sticky: once the player is close, always home in
     this.t = opts.drop ? -Math.random() : 0; // stagger flicker for multi-drops
     this.setDepth(15);
     scene.add.existing(this);
@@ -32,7 +33,30 @@ export class Pickup extends Phaser.GameObjects.Graphics {
     this.t += dt;
     this.life -= dt;
     if (this.life <= 0) { this._destroy(); return; }
-    if (!this.onGround) {
+
+    const pdx = this.x - player.x;
+    const pdy = this.y - (player.y - 60);
+    const pdist = Math.hypot(pdx, pdy);
+
+    // MAGNET: once the player closes within range the pickup locks on and flies
+    // in. Without this, drops spawn on the corpse and players walk away from
+    // every one (audit telemetry: healed=0 across all personas). Velocity is
+    // steered straight toward the player (rather than additively accelerated)
+    // so the spawn pop is killed instantly and the drop zips in — feels like a
+    // lock-on, and the homing flag is sticky so it never flickers at the edge.
+    const M = CONFIG.CONTENT.PICKUP;
+    if (!this.homing && pdist < M.MAGNET_RANGE) this.homing = true;
+    if (this.homing) {
+      const inv = 1 / (pdist || 1);
+      const desVx = -pdx * inv * M.MAGNET_SPEED;
+      const desVy = -pdy * inv * M.MAGNET_SPEED;
+      const k = Math.min(1, dt * M.MAGNET_STEER);
+      this.vx += (desVx - this.vx) * k;
+      this.vy += (desVy - this.vy) * k;
+      this.onGround = false;
+      this.x += this.vx * dt;
+      this.y += this.vy * dt;
+    } else if (!this.onGround) {
       this.vy += CONFIG.GRAVITY * 0.6 * dt;
       this.x += this.vx * dt;
       this.y += this.vy * dt;
@@ -41,10 +65,10 @@ export class Pickup extends Phaser.GameObjects.Graphics {
       if (this.x > CONFIG.WALL_RIGHT) this.x = CONFIG.WALL_RIGHT;
     }
 
-    // collect
+    // collect (fresh coords after movement)
     const dx = this.x - player.x;
     const dy = this.y - (player.y - 60);
-    if (Math.abs(dx) < 42 && Math.abs(dy) < 74) {
+    if (Math.abs(dx) < 46 && Math.abs(dy) < 80) {
       this.dead = true;
       this._collected = true;
     }

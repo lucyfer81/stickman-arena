@@ -198,6 +198,15 @@ export const CONFIG = {
       RAGE_SCORE_MUL: 2.0,     // score multiplier while raging
       SCORE_BONUS: 500,        // instant score from a gold score-bomb pickup
       LIFE: 9,
+      // MAGNET — once the player is within range the pickup locks on and flies
+      // in. Telemetry (Round 10 audit) showed healed=0 for EVERY persona: drops
+      // spawn on the corpse and players walk away from all of them. This is the
+      // root fix that makes the health/rage loop actually engage, and it makes
+      // Second Wind's "kill -> heal -> reform" path reachable in real play.
+      MAGNET_RANGE: 150,       // px — within this, pickup starts homing
+      MAGNET_SPEED: 760,       // cruise speed once locked on (px/s)
+      MAGNET_STEER: 22,        // velocity-blend rate (1/s) — kills the spawn-pop
+                               // and turns the drop toward the player fast
     },
     // rare-event director — remixes one wave occasionally for variety.
     EVENTS: {

@@ -490,3 +490,16 @@ Playwright 抓帧 + ASCII/imgstat "看"画（模型不支持图像输入，沿�
 9s寿命，没人捡。休闲18血0回血=不公平的死；Second Wind重塑(需回血)实际不可达。
 
 Top10与修复顺序详见 DESIGN.md Round 10。本轮先修 #1 资源循环（拾取磁吸）。
+
+### Round 10 — Fix #1 资源循环（拾取磁吸）已上线
+- 根因：血/狂怒拾取物掉在尸体上、42px收集半径、无磁吸、9s寿命，实测 healed=0
+  全 persona。磁吸是根修复，并让 Second Wind 塑造可达。
+- 改动：
+  - `config.js`：PICKUP 加 MAGNET_RANGE(150)/MAGNET_SPEED(760)/MAGNET_STEER(22)。
+  - `Pickup.js`：粘性磁吸——进入范围后转向追踪玩家（速度直接导向，瞬间抵消上弹），
+    homing 标志粘性防抖；离地飞向玩家。
+  - `GameScene.js _reform()`：补 `p.reformed=true`（潜在遥测 bug：曾被读从未写）。
+- 验证：新增 `tests/magnet.spec.js` 3/3（范围内收集/范围外静止/破碎拾血重塑）；
+  官方 CI 5/5、laststand 4/4 全绿。
+- 真人对局证明（休闲 persona 同脚本）：终血 18→74、healed 0→25、分 2915→4135、
+  最佳连击 9→13、击杀 9→12、还吸到狂怒(7.3s)。不再不公平地流血致死。
