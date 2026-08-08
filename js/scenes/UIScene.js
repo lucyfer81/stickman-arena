@@ -163,15 +163,20 @@ export class UIScene extends Phaser.Scene {
     // interactive zone is generously larger than the visual circle
     const zone = this.add.zone(x, y, r * 2.5, r * 2.5).setInteractive();
     const c2 = this.gameScene.controls;
+    // TOUCH hold-to-repeat: PUNCH/KICK auto-swing while held (one tap = one swing
+    // left touch 8x weaker than keyboard mashing). tryAttack() no-ops mid-swing,
+    // so this syncs to the attack cycle. Keyboard stays edge-triggered.
+    const repeatable = (label === 'PUNCH' || label === 'KICK');
+    if (repeatable && !this.touchHeld) this.touchHeld = { PUNCH: false, KICK: false };
     const setFlag = (down) => {
       if (label === 'JUMP') { if (down) { c2.jumpPressed = true; c2.jumpHeldTouch = true; } else c2.jumpHeldTouch = false; }
-      if (label === 'PUNCH' && down) c2.punchPressed = true;
-      if (label === 'KICK' && down) c2.kickPressed = true;
+      if (label === 'PUNCH') { if (down) c2.punchPressed = true; if (repeatable) this.touchHeld.PUNCH = down; }
+      if (label === 'KICK') { if (down) c2.kickPressed = true; if (repeatable) this.touchHeld.KICK = down; }
     };
     zone.on('pointerdown', () => { draw(true); setFlag(true); });
     zone.on('pointerup', () => { draw(false); setFlag(false); });
-    zone.on('pointerout', () => { draw(false); if (label === 'JUMP') c2.jumpHeldTouch = false; });
-    zone.on('pointerupoutside', () => { draw(false); if (label === 'JUMP') c2.jumpHeldTouch = false; });
+    zone.on('pointerout', () => { draw(false); if (label === 'JUMP') c2.jumpHeldTouch = false; if (repeatable) this.touchHeld[label] = false; });
+    zone.on('pointerupoutside', () => { draw(false); if (label === 'JUMP') c2.jumpHeldTouch = false; if (repeatable) this.touchHeld[label] = false; });
     this.touchGroup.add([c, t, zone]);
     return { c, t, zone };
   }
@@ -300,6 +305,15 @@ export class UIScene extends Phaser.Scene {
   update(_time, deltaMs) {
     const hud = this.registry.get('hud');
     if (!hud) return;
+    // TOUCH hold-to-repeat: while a PUNCH/KICK button is held, re-arm the edge
+    // every frame so the next swing fires as soon as the attack cycle allows.
+    // tryAttack() no-ops mid-swing, so this auto-syncs to the player's attack
+    // timing — letting touch players chain attacks like keyboard mashing.
+    if (this.touchHeld && this.gameScene && this.gameScene.controls) {
+      const c = this.gameScene.controls;
+      if (this.touchHeld.PUNCH) c.punchPressed = true;
+      if (this.touchHeld.KICK) c.kickPressed = true;
+    }
     // frame-rate-independent tween rates (were ±0.2/0.1 per frame → 2.4x faster
     // on 144Hz). Normalize to per-second using the actual frame delta.
     const dt = Math.min(deltaMs || 16, 50) / 1000;

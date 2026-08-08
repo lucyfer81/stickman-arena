@@ -41,6 +41,7 @@ module.exports = defineConfig({
     project('music',       /music\.spec\.js/,         60000),
     project('onboard',     /onboard\.spec\.js/,      60000),
     project('assist',      /onboarding-assist\.spec\.js/, 60000),
+    project('autofire',    /mobile-autofire\.spec\.js/,  60000),
     project('playthrough', /playthrough\.spec\.js/, 180000),
     project('qa',          /qa-regression\.spec\.js/, 120000),
     project('retention',   /retention\.spec\.js/,     60000),

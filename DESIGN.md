@@ -318,4 +318,32 @@ enemy is a dummy (the rest apply normal pressure), and the truce is one-shot.
   the far larger group of players who *will* try J but need a moment. #8 (no active
   assist) is resolved; the passive-text gap is closed with a mechanical safe window.
 
+### Fix #3 — mobile hold-to-repeat (touch combat parity) — SHIPPED
+
+**Root cause (telemetry):** mobile scored 860 vs keyboard 6765 and only reached
+wave 2 in 45s. Round 1's bigger buttons helped aim but not throughput: one tap =
+one swing, and tap-lift-tap with a thumb is intrinsically slow. Keyboard players
+mash J freely; touch players couldn't match that cadence.
+
+**Fix (`UIScene.js`):** **hold-to-repeat** for PUNCH/KICK on touch only. Holding
+the button re-arms the attack edge every frame, so the next swing fires the
+instant the attack cycle allows — a thumb resting on PUNCH now chains attacks
+fluidly. `tryAttack()` no-ops mid-swing, so the auto-repeat self-syncs to the
+player's attack timing (no runaway). Keyboard stays edge-triggered (no change for
+desktop). JUMP is unchanged (it uses variable-height hold semantics already).
+
+**Verification:**
+- New `tests/mobile-autofire.spec.js` 2/2 — a held PUNCH starts ≥3 swings (many),
+  while a single discrete edge starts exactly 1 (no runaway without a hold).
+- Official CI 5/5 green incl. mobile-landscape touch.
+- **Real-play proof (30s, realistic slow-thumb mobile):**
+
+| Mode | Score | Kills | Best combo |
+|---|---|---|---|
+| Discrete tap (400ms cadence) | 380 | 2 | 3 |
+| **Hold (thumb rests on button)** | **1440** (3.8×) | **4** (2×) | **9** (3×) |
+
+A realistic mobile player now chains attacks like a keyboard masher. #3 (mobile
+8× weaker) substantially closed at the throughput layer.
+
 
