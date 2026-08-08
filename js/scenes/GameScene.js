@@ -1024,6 +1024,10 @@ export class GameScene extends Phaser.Scene {
     this._checkComboTier();
     if (killed) {
       this.kills++;
+      // COMBO BRIDGE: a kill extends the combo window so the chain survives the
+      // gap to the next enemy. Without this, casuals stall just below the x10
+      // milestone — the window can't bridge a dead enemy to the next walk-up.
+      this.comboTimer = Math.max(this.comboTimer, CONFIG.COMBO_WINDOW + CONFIG.COMBO_KILL_BRIDGE);
       // SECOND WIND: a kill during the broken window is a lifeline — extend the
       // timer and roll a health drop so reform stays within reach.
       if (this.player.broken) {

@@ -57,6 +57,11 @@ export const CONFIG = {
   COMBO_WINDOW: 2.2,
   COMBO_TIERS: [5, 10, 15, 20, 30],   // milestone combos -> bonus + banner
   COMBO_TIER_BONUS: 100,              // flat score bonus per milestone
+  // COMBO BRIDGE: a kill grants extra combo time so the kill -> next-enemy flow
+  // (the core fun) doesn't drop the chain. Telemetry showed casuals stalling at
+  // best-combo 9 — just short of the x10 milestone — because the 2.2s window
+  // couldn't bridge the gap between a dead enemy and the next one walking up.
+  COMBO_KILL_BRIDGE: 0.9,             // extra seconds added to the window on a kill
 
   // First-minute retention tuning. Goal: cut the opening "dead time" (enemies
   // walking in from the walls), give a teachable first contact, and surface a

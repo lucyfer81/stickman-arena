@@ -540,3 +540,11 @@ Top10与修复顺序详见 DESIGN.md Round 10。本轮先修 #1 资源循环（�
   - `GameScene.js spawnOne`：`!early`(墙边)时 `e.sprintT = SPRINT_IN.TIME`。
 - 验证：新增 `tests/sprint-in.spec.js` 3/3（wave4墙边出生设sprintT/early内移带不设/冲刺期速度>基础1.4倍）；
   官方CI 5/5。
+
+### Round 10 — Backlog #6 休闲连击（击杀桥接）已上线
+- 根因：休闲最佳连击卡在 9（够不到 x10 里程碑），因 2.2s 窗口无法跨过"敌人死亡→下一个走上来"的空档。
+- 改动：击杀桥接——每次击杀把连击窗口延长到 COMBO_WINDOW+COMBO_KILL_BRIDGE(2.2+0.9=3.1s)，
+  让"击杀→下一个敌人"的核心爽快循环不断链。非致命命中仍用基础 2.2s 窗口。
+  - `config.js`：COMBO_KILL_BRIDGE = 0.9。
+  - `GameScene.js _onPlayerHit`：killed 分支 `comboTimer = max(comboTimer, COMBO_WINDOW + COMBO_KILL_BRIDGE)`。
+- 验证：新增 `tests/combo-bridge.spec.js` 2/2（非致命=基础窗口/击杀=含桥接）；combo 回归通过。
