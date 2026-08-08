@@ -445,6 +445,7 @@ export class GameScene extends Phaser.Scene {
       let r = Math.random() * total;
       for (const [key, w] of table) { if ((r -= w) <= 0) { variant = key; break; } }
     }
+    const firstOfWave = this.waveFirstSpawn;
     this.waveFirstSpawn = false;
     const fromLeft = Math.random() < 0.5;
     // RETENTION: early waves spawn on an inner band (closer to mid) instead of
@@ -457,6 +458,10 @@ export class GameScene extends Phaser.Scene {
       : (fromLeft ? CONFIG.WALL_LEFT + 10 : CONFIG.WALL_RIGHT - 10);
     const e = new Enemy(this, x, CONFIG.GROUND_Y, variant);
     e.facing = fromLeft ? 1 : -1;
+    // FIRST-TIME ASSIST: wave 1's opening enemy is a passive training dummy so a
+    // confused first-timer gets a safe window to land their first punch (and the
+    // FIRST BLOOD celebration) instead of bleeding out 0-score. Cleared on hit.
+    if (firstOfWave && n === 1) e.passive = true;
     if (this.spawned && this.spawned[variant] != null) this.spawned[variant]++;
     // flank assignment: alternating sides, seeded by spawn side, so the pack
     // surrounds the player rather than stacking on one side. Base the slot on

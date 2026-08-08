@@ -503,3 +503,19 @@ Top10与修复顺序详见 DESIGN.md Round 10。本轮先修 #1 资源循环（�
   官方 CI 5/5、laststand 4/4 全绿。
 - 真人对局证明（休闲 persona 同脚本）：终血 18→74、healed 0→25、分 2915→4135、
   最佳连击 9→13、击杀 9→12、还吸到狂怒(7.3s)。不再不公平地流血致死。
+
+### Round 10 — Fix #2 新手引导（训练假人）已上线
+- 根因：AFK新手30s仍卡wave1、0击杀0分、流血到55血。"PRESS J"文字救不回还没把J=拳
+  联系起来的玩家——敌人先打到了他，他从未拿到教会循环的FIRST BLOOD首杀。
+- 改动：
+  - `config.js`：RETENTION 加 FIRST_ENEMY_PASSIVE_GRACE(5.0s)。
+  - `Enemy.js`：构造加 passive/passiveT；takeHit 命中即解除被动；AI 在进入射程前无条件下
+    tick passiveT（从生成起算的全局休战，非进入射程后），超 grace 或被命中则 passive=false；
+    被动时只靠近不挥拳。
+  - `GameScene.js spawnOne`：捕获 firstOfWave 标志（原 waveFirstSpawn 在创建前被清空），
+    wave1 首敌设 e.passive=true。
+- 验证：新增 `tests/onboarding-assist.spec.js` 4/4——wave1首敌被动且射程内0伤害；命中解除；
+    grace到期解除（确定性，驱动passiveT到阈值）；**集成：发愣2.5s后乱按J的真实新手拿到首杀
+    +FIRST BLOOD、0伤害**。官方CI 5/5、retention 5/5、onboard 1/1 全绿。
+- 诚实局限：纯AFK(从不按键)无法被"奖励参与"的机制拯救，其数字不变；本引导针对"会试按J但
+    需要点时间"的更大众人群。

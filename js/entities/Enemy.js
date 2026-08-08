@@ -89,6 +89,8 @@ export class Enemy extends Stickman {
     this.flashTime = 0;
     this.attackCd = rand(0.4, 1.2);
     this.firstStrike = true; // first swing within range commits immediately
+    this.passive = false;    // training dummy: holds its swing until provoked/grace
+    this.passiveT = 0;
     this.id = ++Enemy._idc;
     this.active = true;
     this.speedMul = 1;
@@ -145,6 +147,11 @@ export class Enemy extends Stickman {
       this.guardBroken = CONFIG.CONTENT.SHIELDER.GUARD_BREAK_TIME;
     }
     this.guardBroken = Math.max(0, this.guardBroken); // (decremented in update)
+
+    // FIRST-TIME ASSIST: the training dummy drops its truce the instant the
+    // player lands a real hit — provocation ends the safe window so the teachable
+    // dummy still fights back once the lesson (press J) has landed.
+    this.passive = false;
 
     this.health -= dmg;
     this.flashTime = 0.12;
@@ -352,6 +359,14 @@ export class Enemy extends Stickman {
     const dist = Math.abs(dx);
     this.facing = sign(dx) || this.facing;
 
+    // FIRST-TIME ASSIST: the training dummy's truce is a fixed window from spawn
+    // (not from first reaching the player), so a slow approach can't extend the
+    // safe time indefinitely. Tick + expire it here, before the melee decision.
+    if (this.passive) {
+      this.passiveT += dt;
+      if (this.passiveT > CONFIG.RETENTION.FIRST_ENEMY_PASSIVE_GRACE) this.passive = false;
+    }
+
     const reach = this.v.attackReach;
     // desired stand position on the enemy's assigned flank side
     const desiredX = player.x + this.flankDir * reach * 0.55;
@@ -440,14 +455,20 @@ export class Enemy extends Stickman {
       this.state = this.onGround ? 'run' : 'jump';
     } else {
       this.vx *= clamp01(1 - 10 * dt);
-      // first strike commits immediately so the player can't stall it with mash;
-      // later swings are gated by attackCd. Only consume the first strike when an
-      // attack actually starts — airborne enemies keep it for when they land.
-      // (Same-flank overlap is intentionally left as-is: it gives the player an
-      // emergent cleave window, and the 0.5s hurt-invlun + one-hit-per-frame rule
-      // means stacked simultaneous swings still only land once. Spreading them out
-      // removed that window and over-pressured jump-spam in wave-6 testing.)
-      if (this.onGround && (this.firstStrike || this.attackCd <= 0)) {
+      // FIRST-TIME ASSIST: a passive training dummy holds its swing. It still
+      // approaches (above) so the encounter has tension, but it won't attack
+      // until the player provokes it (a hit) or the grace timer (tick above)
+      // runs out. This turns the first encounter into a safe teachable moment.
+      if (this.passive) {
+        this.attackCd -= dt;
+      } else if (this.onGround && (this.firstStrike || this.attackCd <= 0)) {
+        // first strike commits immediately so the player can't stall it with mash;
+        // later swings are gated by attackCd. Only consume the first strike when an
+        // attack actually starts — airborne enemies keep it for when they land.
+        // (Same-flank overlap is intentionally left as-is: it gives the player an
+        // emergent cleave window, and the 0.5s hurt-invlun + one-hit-per-frame rule
+        // means stacked simultaneous swings still only land once. Spreading them out
+        // removed that window and over-pressured jump-spam in wave-6 testing.)
         this._startAttack();
         this.firstStrike = false;
       } else if (!this.onGround) {

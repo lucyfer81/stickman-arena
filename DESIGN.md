@@ -290,4 +290,32 @@ but never written).
 The casual player no longer bleeds out unfairly — they heal, survive, and engage
 with more of the game. #7 (unfair near-death) is resolved as a symptom of #1.
 
+### Fix #2 — first-time assist (training dummy) — SHIPPED
+
+**Root cause (telemetry):** the AFK first-timer finished 30s still in wave 1,
+0 kills / 0 score, bleeding to 55HP confused. The "PRESS J" text pointer can't
+rescue a player who hasn't connected J=punch by the time enemies arrive — they
+get hit before they understand what to do, and never earn the FIRST BLOOD win
+that would teach the loop.
+
+**Fix (`Enemy.js` + `GameScene.js` + `config.js`):** wave 1's **opening enemy is a
+passive "training dummy"** — it approaches (tension) but holds its swing until the
+player provokes it (any landed hit) OR `FIRST_ENEMY_PASSIVE_GRACE` (5s, ticked from
+spawn) expires. So a fumbling player gets a real window to see the J-pointer, land
+a punch on the enemy that's right in front of them, and trigger the FIRST BLOOD
+celebration — the dopamine beat that teaches the core loop. Only the *first* wave-1
+enemy is a dummy (the rest apply normal pressure), and the truce is one-shot.
+
+**Verification:**
+- New `tests/onboarding-assist.spec.js` 4/4 — wave-1 opener is passive and deals 0
+  damage while in range; a hit provokes it (passive→false); the grace timer expires
+  passive (deterministic, driven to threshold); **integration: a fumbling player
+  (freeze 2.5s then mash J) lands a kill + FIRST BLOOD at 0 damage.**
+- Official CI 5/5 green; `retention` 5/5 + `onboard` 1/1 green (spawnOne unchanged
+  shape).
+- Honest limitation: the *AFK* persona (presses nothing, ever) can't be rescued by
+  a mechanic that rewards engaging — its numbers are unchanged. The assist targets
+  the far larger group of players who *will* try J but need a moment. #8 (no active
+  assist) is resolved; the passive-text gap is closed with a mechanical safe window.
+
 

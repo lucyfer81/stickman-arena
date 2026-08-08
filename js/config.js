@@ -82,6 +82,13 @@ export const CONFIG = {
     FIRST_BLOOD_PAUSE: 0.12,
     // vanguard mini-elite — one early duel, wave 2 first spawn only
     VANGUARD_WAVE: 2,
+    // FIRST-TIME ASSIST: wave 1's opening enemy is a "training dummy" — it
+    // approaches but holds its swing until the player hits it first OR this grace
+    // expires. AFK/confused first-timers were bleeding out 0-score in wave 1
+    // (audit). The truce gives them room to see the J-pointer, land a punch, and
+    // earn the FIRST BLOOD celebration — teaching the core loop with a guaranteed
+    // early win instead of a confused death.
+    FIRST_ENEMY_PASSIVE_GRACE: 5.0,  // seconds the dummy holds its swing
   },
 
   // ---- SECOND WIND ("The Broken") — surprising comeback mechanic ----
