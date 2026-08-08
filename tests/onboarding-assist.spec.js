@@ -128,6 +128,15 @@ test.describe('First-time assist (training dummy)', () => {
     page.on('pageerror', (e) => errors.push(String(e && e.stack || e)));
     await startGame(page);
     await page.waitForTimeout(2500); // freeze, overwhelmed
+    // isolate the passive dummy: keep only the first (wave-1 opening) enemy so the
+    // safe-window claim is measured against the dummy itself, not the 2nd grunt's
+    // ambient pressure (a separate concern).
+    await page.evaluate(() => {
+      const s = window.__game.scene.getScene('Game');
+      for (let i = 1; i < s.enemies.length; i++) { s.enemies[i].dead = true; s.enemies[i].destroy(); }
+      s.enemies = s.enemies.slice(0, 1);
+      s.spawnQueue = 0;
+    });
     const end = Date.now() + 6000;
     while (Date.now() < end) { await page.keyboard.press('J'); await page.waitForTimeout(280); }
     const t = await page.evaluate(() => {
