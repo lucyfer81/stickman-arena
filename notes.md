@@ -548,3 +548,14 @@ Top10与修复顺序详见 DESIGN.md Round 10。本轮先修 #1 资源循环（�
   - `config.js`：COMBO_KILL_BRIDGE = 0.9。
   - `GameScene.js _onPlayerHit`：killed 分支 `comboTimer = max(comboTimer, COMBO_WINDOW + COMBO_KILL_BRIDGE)`。
 - 验证：新增 `tests/combo-bridge.spec.js` 2/2（非致命=基础窗口/击杀=含桥接）；combo 回归通过。
+
+### Round 10 — Backlog #4 硬核威胁（群体压迫）已上线
+- 根因：硬核 90s 仅挨 2 打——能 stunlock 单列敌人、轮流应付单次挥击，普通波零威胁。
+- 改动：pack pressure——同场活敌 > SWARM_THRESHOLD(3) 且 wave >= MIN_WAVE(3) 时，每多一个敌人
+  加攻击激进度(AGGR_PER 0.10) + 移速(SPEED_PER 0.07)，上限 MAX_BONUS 0.35。奖励"快速清场防成群"，
+  威胁被动玩法；1-2 敌的小战斗(休闲前期)不受影响。
+  - `config.js`：ENEMY.SWARM {THRESHOLD:3, MIN_WAVE:3, AGGR_PER:0.10, SPEED_PER:0.07, MAX_BONUS:0.35}。
+  - `Enemy.js`：构造 swarmMul/swarmSpeedMul；_startAttack `aggr = aggrMul * swarmMul`；接近移动 `* swarmSpeedMul`。
+  - `GameScene.js update`：每帧按活敌数算 swarmAggr/swarmSpeed 写入各敌人。
+- 验证：新增 `tests/pack-pressure.spec.js` 3/3（小战斗无加成/群体加成且aggr>speed/wave<3豁免）；
+  官方CI 5/5、variety 14/14 全绿。（中途一次 CI 失败为我强杀超时命令留下的孤儿进程争用8080，清掉后全过，非回归。）

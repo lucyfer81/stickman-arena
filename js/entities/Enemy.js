@@ -99,6 +99,8 @@ export class Enemy extends Stickman {
     this.hpMul = 1;
     this.dmgMul = 1;
     this.aggrMul = 1;     // wave-dependent aggression (lower recover/cooldown)
+    this.swarmMul = 1;    // live pack-pressure aggression bonus (crowds attack faster)
+    this.swarmSpeedMul = 1; // live pack-pressure move-speed bonus
     this.flankDir = 1;    // desired side relative to player (+1 right / -1 left)
     // boss-only state
     this.isBoss = variant === 'boss' || variant === 'bossCaster';
@@ -458,7 +460,7 @@ export class Enemy extends Stickman {
       // don't leave a ~3.8s walk-up dead gap. Drops off as soon as they reach the
       // fight (this branch only runs pre-commitRange) and as the timer expires.
       const sprint = this.sprintT > 0 ? CONFIG.RETENTION.SPRINT_IN.BOOST : 1;
-      this.vx += (dir * this.v.speed * this.speedMul * sprint - this.vx) * clamp01(8 * dt);
+      this.vx += (dir * this.v.speed * this.speedMul * sprint * this.swarmSpeedMul - this.vx) * clamp01(8 * dt);
       this.state = this.onGround ? 'run' : 'jump';
     } else {
       this.vx *= clamp01(1 - 10 * dt);
@@ -493,7 +495,7 @@ export class Enemy extends Stickman {
   // intact to preserve the player's emergent cleave + the tuned difficulty.)
 
   _startAttack() {
-    const aggr = this.aggrMul;
+    const aggr = this.aggrMul * this.swarmMul;  // pack pressure: crowds swing faster
     const windupFloor = CONFIG.ENEMY.ATTACK_WINDUP * 0.62; // keep it readable
     const leap = this.variant === 'leaper';
     this.attack = {

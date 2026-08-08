@@ -52,6 +52,19 @@ export const CONFIG = {
     ATTACK_RECOVER: 0.34,
     KNOCKBACK: 380,
     MAX_ALIVE: 6,
+    // PACK PRESSURE: a skilled player can stunlock a single file of enemies and
+    // never lose. Crowds should escalate — once SWARM_THRESHOLD enemies are
+    // alive, each extra enemy adds aggression (faster swings) + speed, capped.
+    // This rewards killing fast to prevent a swarm and threatens passive play,
+    // without touching 1-2-enemy fights (where casuals live). Gated to wave >=
+    // MIN_WAVE so the first-minute teaching beats stay gentle.
+    SWARM: {
+      THRESHOLD: 3,      // alive count at which pressure starts building
+      MIN_WAVE: 3,       // don't apply during the gentle opening waves
+      AGGR_PER: 0.10,    // aggression added per enemy beyond the threshold
+      SPEED_PER: 0.07,   // move-speed added per enemy beyond the threshold
+      MAX_BONUS: 0.35,   // hard cap so a full crowd stays fair
+    },
   },
 
   COMBO_WINDOW: 2.2,

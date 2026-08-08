@@ -1254,7 +1254,26 @@ export class GameScene extends Phaser.Scene {
       if (this.waveBreak <= 0) this.startWave(this.wave + 1);
     }
 
-    for (const e of this.enemies) e.update(stepDt, this.player);
+    // PACK PRESSURE: once a crowd forms, enemies coordinate — faster + more
+    // aggressive — so a skilled player can't stunlock a single-file queue and so
+    // passive play gets punished. Gated to wave >= MIN_WAVE; 1-2-enemy fights
+    // (the casual early game) are untouched.
+    const SW = CONFIG.ENEMY.SWARM;
+    let swarmAggr = 1, swarmSpeed = 1;
+    if (this.wave >= SW.MIN_WAVE) {
+      const alive = this.enemies.filter((e) => !e.dead).length;
+      if (alive > SW.THRESHOLD) {
+        const over = alive - SW.THRESHOLD;
+        swarmAggr = 1 + Math.min(SW.MAX_BONUS, over * SW.AGGR_PER);
+        swarmSpeed = 1 + Math.min(SW.MAX_BONUS, over * SW.SPEED_PER);
+      }
+    }
+
+    for (const e of this.enemies) {
+      e.swarmMul = swarmAggr;
+      e.swarmSpeedMul = swarmSpeed;
+      e.update(stepDt, this.player);
+    }
     // cleanup only fully-destroyed enemies (scene nulled by Phaser.destroy()).
     // Dead-but-animating enemies stay so their death tween + destroy() can run;
     // removing them early left frozen corpses on screen and leaked Graphics.
