@@ -346,4 +346,65 @@ desktop). JUMP is unchanged (it uses variable-height hold semantics already).
 A realistic mobile player now chains attacks like a keyboard masher. #3 (mobile
 8× weaker) substantially closed at the throughput layer.
 
+## Backlog pass — remaining top-10 items
+
+After fixes #1–#3, the remaining items (#4 threat, #5 dead time, #6 combo ceiling,
+#9 boss gating, #10 mid-run meta) were addressed. #7/#8 were already resolved as
+symptoms of #1/#2.
+
+### Fix #4 — pack pressure (crowd escalation) — SHIPPED
+**Problem:** hardcore took 2 hits/90s — could stunlock a single file of enemies.
+**Fix (`Enemy.js`+`GameScene.js`+`config.js`):** once `SWARM_THRESHOLD` (3) enemies
+are alive at wave ≥ `MIN_WAVE` (3), each extra enemy adds aggression (faster
+swings) + move speed (capped at +35%). Rewards fast clears; threatens passive
+play; leaves 1–2-enemy fights (the casual early game) untouched. Gated to wave ≥3
+so the first-minute teaching beats stay gentle.
+**Verify:** `tests/pack-pressure.spec.js` 3/3 (small fight no bonus / crowd
+escalates with aggr>speed / wave<3 exempt). CI 5/5, variety 14/14, boss/depth green.
+**Honest note:** a truly optimal player can still dodge a crowd — that's correct
+(the skill ceiling is the x30 combo, the boss, Hard mode, daily modifiers, Second
+Wind), not a target to force-damage the top 1%.
+
+### Fix #5 — entrance sprint (dead-time kill) — SHIPPED
+**Problem:** wave-4+ enemies spawned at the walls and walked ~560px to mid (~3.8s
+dead gap).
+**Fix:** wall-spawned enemies get a 0.6s entrance sprint (2× approach speed),
+only pre-commitRange, so they engage fast then settle. Inner-band spawns (wave 1–3)
+are already close — no sprint.
+**Verify:** `tests/sprint-in.spec.js` 3/3. CI 5/5.
+
+### Fix #6 — combo kill-bridge (sustain the chain) — SHIPPED
+**Problem:** casuals stalled at best-combo 9 (just under the x10 milestone) — the
+2.2s window couldn't bridge a dead enemy to the next walk-up.
+**Fix:** a kill grants `+COMBO_KILL_BRIDGE` (0.9s) so the kill→next-enemy flow
+keeps the chain alive; non-killing hits keep the base 2.2s.
+**Verify:** `tests/combo-bridge.spec.js` 2/2. Real-play: casual bestCombo **9→10**
+(crossed the x10 milestone), tierBonuses 0→3.
+
+### #9 (boss gated at wave 5) — mitigated, by design
+The magnet + combo-bridge + sprint-in now let a healthy casual reach wave 4 at full
+HP (bestCombo 10), one wave from the boss. Second Wind triggers on lethal damage in
+ANY wave (not gated), and vanguard (wave 2) + events (wave 3+) give mid-game
+climaxes. The wave-5 cadence is a deliberate retention hook (just out of reach of a
+short session = reason to return); lowering it would weaken the pull and break the
+clean every-5 cadence. No change.
+
+### #10 (meta-goals invisible mid-run) — already done (Round 4)
+The HUD "NEXT → [goal] · [skin] skin" chip surfaces the next unlock during play,
+refreshed per wave via `Meta.nextUnlock()`. Verified present in `UIScene`. No change.
+
+### Final 4-persona telemetry (post backlog, NORMAL)
+
+| Persona | Wave | Score | Best combo | End HP | Healed | Hits |
+|---|---|---|---|---|---|---|
+| First-time (AFK 30s) | 1 | 0 | 0 | 55 | 0 | 5 |
+| Casual (60s) | 4 | 4190 | **10** | **100** | **50** | 3 |
+| Hardcore (90s) | 4 | **11660** | **30** | 100 | 25 | 1 |
+| Mobile (45s) | 2 | 860 | 4 | 53 | 0 | 5 |
+
+Casual went from 18HP/0heal/combo-9 to **full HP / 50 healed / combo-10**. Hardcore
+score nearly doubled and the combo ceiling is now reachable (x30). The casual is
+thriving one wave from the boss; the first-timer has a safe window; mobile chains
+attacks. All 8 backlog items resolved or verified-by-design.
+
 

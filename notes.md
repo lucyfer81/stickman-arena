@@ -559,3 +559,14 @@ Top10与修复顺序详见 DESIGN.md Round 10。本轮先修 #1 资源循环（�
   - `GameScene.js update`：每帧按活敌数算 swarmAggr/swarmSpeed 写入各敌人。
 - 验证：新增 `tests/pack-pressure.spec.js` 3/3（小战斗无加成/群体加成且aggr>speed/wave<3豁免）；
   官方CI 5/5、variety 14/14 全绿。（中途一次 CI 失败为我强杀超时命令留下的孤儿进程争用8080，清掉后全过，非回归。）
+
+### Round 10 — Backlog #9/#10 评估（不改）
+- #9 Boss卡wave5：累积修复后休闲满血到wave4(连击10)，差一波到Boss；Second Wind任何波触发；
+  vanguard(wave2)+事件(wave3+)给中段高潮。wave-5是刻意留存钩子，降低反削吸引力且破坏every-5节奏+测试。不改。
+- #10 局内元进度：Round 4 已实现 HUD "NEXT→目标·皮肤" 目标条(按波刷新 Meta.nextUnlock)。已验证存在。不改。
+
+### Round 10 backlog 总结
+全 8 项处理：#1磁吸/#2假人/#3按住连击(已上线) + #4群体压迫/#5冲刺入场/#6击杀桥接(本轮上线) +
+#7/#8随#1/#2解决 + #9/#10评估不改(已由既有实现或累积修复缓解)。
+新增测试：magnet3/assist4/autofire2/sprint3/bridge2/swarm3 共17项，全绿。
+最终persona：休闲 18血0治连击9 → 满血50治连击10；硬核分6765→11660、连击19→30。
