@@ -198,4 +198,61 @@ kick = committed finisher/spacing tool (vs brutes, boss recover windows),
 cancel = the skill-expression glue. Still proxy-measured; the remaining
 proposal (low-HP berserk comeback) is queued for a future pass.
 
+## Round 10 — Lead-designer audit (fresh 4-persona playthrough)
+
+Re-ran the original audit (Playwright personas + `window.__stickman` telemetry)
+on the post-9-rounds build to find what's *still* hurting players today.
+
+### Raw telemetry (this round, NORMAL difficulty)
+
+| Persona | Duration | Wave | Score | Best combo | End HP | Hits taken | Healed | Kills |
+|---|---|---|---|---|---|---|---|---|
+| First-time (AFK) | 30s | 1 | 0 | 0 | 55 | 5 (45 dmg) | **0** | 0 |
+| Casual (slow) | 60s | 4 | 2915 | 9 | **18** | 8 (82 dmg) | **0** | 9 |
+| Hardcore (aggro) | 90s | 5 (boss) | 6765 | 19 | 74 | 2 (26 dmg) | **0** | 12 |
+| Mobile (touch) | 45s | 2 | 860 | 4 | 53 | 5 (47 dmg) | **0** | 4 |
+
+### Persona reviews
+
+**Casual** — "I was *loving* it until I realised I was about to die. The bombsquad
+wave was chaos in a good way, combos popped, the FIRST BLOOD banner made me grin.
+But I ended at 18 HP and I never saw a single health pickup — I killed 9 guys and
+got NOTHING back. When I die next hit it's going to feel cheap, like the game
+didn't give me a chance. Make health come to me." Enjoyment 6/10 · Retention: weak.
+
+**Hardcore** — "Normal waves are still a warm-up I can't lose — 2 hits in 90s.
+The boss is the only thing that respects me, and even then I walked in at near
+full. The juice is incredible (that punch-zoom on every connect!) but I never
+once had to interact with health, rage, or Second Wind, because I was never in
+danger on the way up. Give me a reason to sweat before wave 5." 6/10 · weak.
+
+**Mobile** — "I scored 8x less than keyboard and only saw 2 waves. The buttons
+are bigger now but tapping PUNCH then KICK with one thumb is still slow and I
+keep taking hits I can't answer. I never even saw a heal. It's fine for a bus
+ride but keyboard players are playing a different, better game." 4/10 · weak.
+
+**First-time** — "I pressed Start and froze. Two guys walked up and hit me. Some
+text flashed 'PRESS J TO FIGHT' but by then I was already confused and just
+watched myself bleed for 30 seconds. 0 kills, 0 score, still wave 1. I'd close
+the tab." 3/10 · terrible (D1 churn).
+
+### Top 10 problems (ranked by impact)
+
+| # | Problem | Sev | Retention | Enjoyment |
+|---|---|---|---|---|
+| 1 | **Resource loop broken — nobody collects health pickups (healed:0 for ALL personas).** Drops spawn at the corpse, 42px collect radius, no magnet, 9s life. Casual died at 18HP with 0 recovery; Second Wind's reform path (needs a heal) is effectively unreachable in real play. Wastes the pickup feature + gates the flagship comeback. | CRIT | High | High |
+| 2 | **First-time D1 churn** — 0 kills/0 score, stuck wave 1 for 30s, bleeds to 55HP. Text hints ("PRESS J") don't rescue a frozen player. | CRIT | Critical | High |
+| 3 | **Mobile combat 8x weaker than KB** (860 vs 6765 score; wave 2 in 45s). Bigger buttons helped but discrete thumb-taps still can't chain. | HIGH | High | High |
+| 4 | **Normal-wave threat too low for skilled play** — hardcore took 2 hits/90s; all real danger back-loaded to the wave-5 boss. | HIGH | High | Med |
+| 5 | **Dead time persists** — opening 0-score stretches + between-wave flat plateaus (hardcore score flat ~2.5s across wave 4). | MED-HI | Med | Med |
+| 6 | **Casual combo ceiling low (best 9)** — 2.2s window + slow reactions; can't reach higher tiers/rewards. | MED | Med | Med |
+| 7 | **Casual near-death with no recovery path** — 18HP/0heal, next hit lethal, reads as unfair. (symptom of #1) | MED | Med | Med |
+| 8 | **First-time has no active assist** — AFK lifeline is passive text only; no auto-demo/safe-first-hit. | MED | Med | Med |
+| 9 | **Game's best content (boss/Second Wind) gated behind wave 5** — casual/mobile never reach it in a typical session. | MED | Med | Low |
+| 10 | **Meta-goals invisible mid-run** — unlocks/stats only surface at Game Over; nothing pulls through flat stretches. | LOW-MED | Low | Low |
+
+### Fix order
+1 (resource loop / pickup magnet) → 2 (first-time assist) → 4 (early threat) →
+3 (mobile chaining) → iterate.
+
 
