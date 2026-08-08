@@ -89,6 +89,12 @@ export const CONFIG = {
     // earn the FIRST BLOOD celebration — teaching the core loop with a guaranteed
     // early win instead of a confused death.
     FIRST_ENEMY_PASSIVE_GRACE: 5.0,  // seconds the dummy holds its swing
+    // DEAD TIME: wave-4+ enemies spawn at the walls and walk ~560px to mid (~3.8s
+    // of nothing-to-do). A short "sprint-in" entrance closes that gap fast so the
+    // action stays dense past the early game, while preserving the "pressure from
+    // the edges" flank feel. Only the approach (pre-commitRange) is boosted, so a
+    // sprinting enemy still settles to normal speed once in the fight.
+    SPRINT_IN: { TIME: 0.6, BOOST: 2.0 },  // seconds of entrance sprint / speed multiplier
   },
 
   // ---- SECOND WIND ("The Broken") — surprising comeback mechanic ----

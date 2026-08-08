@@ -530,3 +530,13 @@ Top10与修复顺序详见 DESIGN.md Round 10。本轮先修 #1 资源循环（�
   含移动横屏。
 - 真人对局证明（30s 慢拇指）：离散点击(400ms) 380分/2杀/3连 vs 按住 1440分(3.8x)/4杀(2x)/
   9连(3x)。移动端现在能像键盘连按一样流畅连击。
+
+### Round 10 — Backlog #5 死时间（敌人冲刺入场）已上线
+- 根因：wave4+ 敌人从墙边(x≈74/1206)走到中场(~640)约560px，~3.8s 无事可做的空窗。
+- 改动：墙边出生的敌人(wave4+)获得 0.6s 入场冲刺(2x 接近速度)，只作用于接近阶段
+  (commitRange 外)，进入战斗即恢复常速。内移带出生(wave1-3)不开冲刺(已够近)。
+  - `config.js`：RETENTION.SPRINT_IN {TIME:0.6, BOOST:2.0}。
+  - `Enemy.js`：构造 sprintT；update 无条件衰减；接近移动行乘 sprint 倍率(仅 sprintT>0)。
+  - `GameScene.js spawnOne`：`!early`(墙边)时 `e.sprintT = SPRINT_IN.TIME`。
+- 验证：新增 `tests/sprint-in.spec.js` 3/3（wave4墙边出生设sprintT/early内移带不设/冲刺期速度>基础1.4倍）；
+  官方CI 5/5。

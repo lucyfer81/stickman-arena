@@ -91,6 +91,8 @@ export class Enemy extends Stickman {
     this.firstStrike = true; // first swing within range commits immediately
     this.passive = false;    // training dummy: holds its swing until provoked/grace
     this.passiveT = 0;
+    this.sprintT = 0;        // entrance sprint: briefly boosts approach speed so
+                             // wall-spawned enemies don't leave a walk-up dead gap
     this.id = ++Enemy._idc;
     this.active = true;
     this.speedMul = 1;
@@ -287,6 +289,7 @@ export class Enemy extends Stickman {
   update(dt, player) {
     this.animTime += dt;
     if (this.flashTime > 0) this.flashTime -= dt;
+    if (this.sprintT > 0) this.sprintT -= dt;
 
     if (this.dead) {
       this.deadT += dt / 0.7;
@@ -451,7 +454,11 @@ export class Enemy extends Stickman {
       // reposition toward the flank slot (keeps enemies on both sides)
       const tx = standoff > 30 && dist <= commitRange * 1.5 ? desiredX : player.x;
       const dir = sign(tx - this.x) || sign(dx) || 1;
-      this.vx += (dir * this.v.speed * this.speedMul - this.vx) * clamp01(8 * dt);
+      // entrance sprint: briefly close from spawn at 2x so wall-spawned enemies
+      // don't leave a ~3.8s walk-up dead gap. Drops off as soon as they reach the
+      // fight (this branch only runs pre-commitRange) and as the timer expires.
+      const sprint = this.sprintT > 0 ? CONFIG.RETENTION.SPRINT_IN.BOOST : 1;
+      this.vx += (dir * this.v.speed * this.speedMul * sprint - this.vx) * clamp01(8 * dt);
       this.state = this.onGround ? 'run' : 'jump';
     } else {
       this.vx *= clamp01(1 - 10 * dt);

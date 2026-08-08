@@ -458,6 +458,10 @@ export class GameScene extends Phaser.Scene {
       : (fromLeft ? CONFIG.WALL_LEFT + 10 : CONFIG.WALL_RIGHT - 10);
     const e = new Enemy(this, x, CONFIG.GROUND_Y, variant);
     e.facing = fromLeft ? 1 : -1;
+    // DEAD TIME: wall-spawned enemies (wave 4+) get a brief entrance sprint so
+    // the ~3.8s walk-up to mid doesn't leave a dead gap. Inner-band spawns are
+    // already close, so they don't need it.
+    if (!early) e.sprintT = CONFIG.RETENTION.SPRINT_IN.TIME;
     // FIRST-TIME ASSIST: wave 1's opening enemy is a passive training dummy so a
     // confused first-timer gets a safe window to land their first punch (and the
     // FIRST BLOOD celebration) instead of bleeding out 0-score. Cleared on hit.
