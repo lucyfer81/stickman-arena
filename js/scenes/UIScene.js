@@ -102,6 +102,25 @@ export class UIScene extends Phaser.Scene {
     this.touchGroup.add([this.btnBurstG, this.btnBurstT, this.btnBurstLabel, this.btnBurstZone]);
     this._drawBurstBtn(false);
 
+    // MERCY SPARE touch button (top-LEFT, mirrors BURST). Only visible +
+    // interactive while a surrender window is open (hud.mercyActive). Pressing
+    // it any other time is a no-op (the scene handler guards).
+    this._mercyActive = false;
+    this.btnSpareG = this.add.graphics().setScrollFactor(0);
+    this.btnSpareT = this.add.text(72, by - 118, '\u2696', {
+      fontFamily: 'Arial Black', fontSize: '26px', color: '#0b1a2a',
+    }).setOrigin(0.5);
+    this.btnSpareLabel = this.add.text(72, by - 94, 'SPARE', {
+      fontFamily: 'Arial Black', fontSize: '10px', color: '#0b1a2a',
+    }).setOrigin(0.5);
+    this.btnSpareZone = this.add.zone(72, by - 108, 96, 96).setInteractive();
+    this.btnSpareZone.on('pointerdown', () => {
+      const c = this.gameScene.controls;
+      if (c) c.sparePressed = true;
+    });
+    this.touchGroup.add([this.btnSpareG, this.btnSpareT, this.btnSpareLabel, this.btnSpareZone]);
+    this._drawSpareBtn(false);
+
     this.input.addPointer(2);
 
     // joystick pointer handling on left-bottom
@@ -218,6 +237,27 @@ export class UIScene extends Phaser.Scene {
     this.btnBurstLabel.setPosition(bx, by + 18).setAlpha(ready ? 1 : 0.4);
     this.btnBurstT.setColor(ready ? '#0b1a2a' : '#7a5e1a');
     this.btnBurstLabel.setColor(ready ? '#0b1a2a' : '#7a5e1a');
+  }
+
+  // MERCY SPARE button — soft white while a surrender window is open, hidden
+  // otherwise. Mirrors _drawBurstBtn but lives top-LEFT (BURST is top-right).
+  _drawSpareBtn(active) {
+    const g = this.btnSpareG;
+    const bx = 72, by = CONFIG.HEIGHT - 84 - 108;
+    const r = active ? 40 : 0; // zero radius = effectively invisible
+    g.clear();
+    if (active) {
+      g.fillStyle(0xeaf4ff, 0.9);
+      g.fillCircle(bx, by, r);
+      g.lineStyle(3, 0xffffff, 1);
+      g.strokeCircle(bx, by, r);
+      g.lineStyle(2, 0xbfe3ff, 0.6);
+      g.strokeCircle(bx, by, r + 6);
+    }
+    this.btnSpareT.setPosition(bx, by - 6).setAlpha(active ? 1 : 0);
+    this.btnSpareLabel.setPosition(bx, by + 18).setAlpha(active ? 1 : 0);
+    this.btnSpareT.setColor(active ? '#0b1a2a' : '#8893a6');
+    this.btnSpareLabel.setColor(active ? '#0b1a2a' : '#8893a6');
   }
 
   _buildMute() {
@@ -357,6 +397,11 @@ export class UIScene extends Phaser.Scene {
     if (this.btnBurstG && this._drawBurstBtn) {
       const ready = !!(hud && hud.burstReady);
       if (ready !== this._burstReady) { this._burstReady = ready; this._drawBurstBtn(ready); }
+    }
+    // MERCY SPARE touch button: only visible while a surrender window is open.
+    if (this.btnSpareG && this._drawSpareBtn) {
+      const active = !!(hud && hud.mercyActive);
+      if (active !== this._mercyActive) { this._mercyActive = active; this._drawSpareBtn(active); }
     }
     // frame-rate-independent tween rates (were ±0.2/0.1 per frame → 2.4x faster
     // on 144Hz). Normalize to per-second using the actual frame delta.

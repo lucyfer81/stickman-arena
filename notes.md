@@ -808,3 +808,95 @@ kick 0.46s 连接、0.62s 空挥）与伤害（11/16）一字未改，boss 大�
 - 真人手感需 A/B 盲测（无法在本环境做）；改动都基于公开 game-feel 原理（Disney 12 原则的
   squash/anticipation/follow-through + Vlambeer 的 impulse shake + Jan Willem Nijman 的 hit-stop）。
 - look-ahead 比理想弱（仅在 zoom-in 时生效）——若未来愿意重做背景边界扩展，可恢复 idle 漂移。
+
+## Round 15 — 趣味导向：MERCY「The Coward's End」（唯一的"意外"机制）
+
+以创意总监视角：游戏已稳、已 juice、已有 Second Wind 旗舰。缺的是**玩家会主动讲给别人听**的
+意外瞬间，且不能是通用功能。审计现有签名时刻：Second Wind（反应性 0 血高潮）、OVERDRIVE
+（玩家自造爆发）、Boss 决斗（脚本化峰值）。缺的轴是**颠覆类型核心动词**——格斗游戏的动词是
+"杀光一切"，而游戏从不打破它。这是杠杆。
+
+### 三个候选（择优）
+1. **MERCY 投降**（颠覆动词）✓ 选——几乎无 brawler 允许留活口；首次触发会有 2 秒"等等我该
+   怎么办"的真暂停；火柴人骨架可读跪/鞠躬；每波结尾各异。
+2. 尸体当武器（ragdoll golf）——好笑可分享但 bit 已知（Goat Simulator 等），不够 unusual。
+3. 持久宿敌 Nemesis（跨局仇敌）——很可讲但需跨局持久化+命名+HUD，单轮范围过大。
+
+### 机制：MERCY「The Coward's End」
+- **触发**：非 Boss 波、wave≥2、玩家非 broken、场上仅剩 1 名活敌、该敌 HP≤30% max、且本波
+  未触发过（`mercyDone` 每波 gate）→ 45% 概率（一次性 roll）该敌**投降**。
+- **投降表现**：丢武器、跪地（新 `surrenderPose`：臀落近地、双手举过头、颤抖正弦、白旗在杆
+  上波动）、脚下白色聚光灯池、战斗音乐 duck 到 menu 强度、横幅 **"MERCY?"**、0.25s 慢镜。
+- **三选一（~2.8s 窗口）**：
+  - **SPARE**（H 键 / 左上 SPARE 触屏钮）：敌起立鞠躬 → 步行离场（`depart` 阶段，460px/s）。
+    奖励 = `150×wave×scoreMul`（严格 > WAVE CLEAR 的 100×wave）+ **必掉拾取物**（50% 治疗/
+    25% 狂怒/25% 分数宝石，磁铁送达）。反馈：慢镜 0.35s + 白环 + 金/白双色粒子 +
+    "MERCY +N" 横幅。`departed` 保持 false → 波在敌真正走出场时才 clear（让 MERCY 横幅先呼吸，
+    再接 WAVE CLEAR）。
+  - **KILL**（照常出拳/踢/大招）：正常死亡 + 正常奖励，**无惩罚**；叠加一层短暂灰色去饱和脉动
+    （复用 veilLayer，灰色边框非红）+ "…" 浮字。`mercyKills` 计数。
+  - **IGNORE**（窗口超时）：敌"失去希望"→ 全速冲刺离场（`flee` 520px/s），`departed=true` 立即
+    放行波 clear；"…coward" 小喜剧浮字。`mercyFlees` 计数。
+
+### 为何"意外/可记忆"而非通用
+1. **颠覆类型核心动词**（杀光一切）——brawler 几乎不留活口，首次触发你真不知道该怎么办。
+2. **火柴人专属**：跪+鞠躬+双手举起在骨架上完全可读，是这种美术风格能承载的情绪。
+3. **每波结尾各异**：残暴清场 / 安静仁慈 / 黑暗击杀 / 喜剧逃跑——无新内容却有复玩差异。
+4. **造故事**："我在第 7 波放了所有人" / "我杀了投降的家伙，不太好受" / "最后一个被我吓跑了"。
+5. **稀缺性**：每波 1 次 + 45% + 低血量 + 非 Boss 门控 → 永远是故事，不是套路。
+
+### 改动（5 文件，复用现有系统，新增面小）
+- `config.js`：新增 `MERCY` 调参块（HP_FRAC/CHANCE/MIN_WAVE/WAIT_TIME/KNEEL_TIME/BOW_TIME/
+  BONUS_PER_WAVE/SPARE_SLOWMO/FLEE_SPEED/EXCLUDED/PICKUP_WEIGHTS）。
+- `Stickman.js`：新增 `surrenderPose(t,p)`（跪→鞠躬插值，tremble 正弦）+ `computePose` 加
+  `'surrender'` case。
+- `Enemy.js`：
+  - `surrender`/`departed` 状态字段；`_startSurrender`（场景触发）→ `_progressSurrender`
+    （kneel→wait→bow→depart / flee 状态机 + 物理 + 离场 destroy）；`_bow()`/`_flee()` 场景钩子。
+  - `update()`：投降优先于所有动作状态（dead 之后第一分支）；`getHitbox()` 投降时返回 null
+    （永不伤害玩家）；`_render()` 投降分支 + 旗帜/聚光灯 overlay（白旗杆+波动布+地面光池）。
+  - `takeHit()`：bow/depart/flee 阶段返回 false（放过后无敌）；kneel/wait 仍可被击杀（KILL 路径）。
+  - `isHittable()`：集中谓词（dead 或 post-choice 投降 → false），供 combat + Overdrive AoE 共用。
+- `GameScene.js`：
+  - 状态：`mercyActive`/`mercyDone`/`mercySpares`/`mercyKills`/`mercyFlees`/`_mercyKillVeil`。
+  - `_maybeStartMercy()`：每帧触发检查；`_startMercyOn(e)`；`_onSurrenderStart(e)`（敌回调：
+    设 mercyActive + "MERCY?"横幅 + 音乐 duck + 0.25s 慢镜）；`_spareEnemy()`（H/触屏入口）；
+  `_expireMercy()`（窗口超时→flee）；`_tickMercy(dt)`；`_registerMercyKill(e)`（黑暗 "…" 节拍 +
+  灰色 veil 脉动）；`_drawMercyKillVeil()`（复用 veilLayer 灰色边框）；`_restoreMusicAfterMercy()`。
+  - `_onPlayerHit` 顶部：击杀投降中（kneel/wait）的敌 → 调 `_registerMercyKill`。
+  - 输入：`c.sparePressed` + H 键监听 + 触屏 SPARE 按钮（UIScene）；update 每帧调
+    `_maybeStartMercy`/`_tickMercy`/衰减 `_mercyKillVeil`/绘 veil。
+  - **波 clear 过滤器**：`!e.dead && !e.departed`（departed 仅 flee 路径置真；spare 让敌走完再 clear）。
+  - HUD payload 加 `mercyActive`；遥测加 `mercyActive`/`mercySpares`/`mercyKills`/`mercyFlees`；
+    `__test` 钩子 `forceMercy`/`spareEnemy`/`expireMercy`/`mercyState`；`startWave` 重置 mercy 门控。
+- `UIScene.js`：左上 SPARE 触屏钮（镜像右上 BURST）+ `_drawSpareBtn`（仅 mercyActive 时显形发光）。
+- 设计文档：`docs/superpowers/specs/2026-08-09-mercy-design.md`。
+
+### 验证（实跑，零回归）
+- 新增 `tests/mercy.spec.js` **7/7 绿**：① 触发门控（forceMercy 起投降、遥测 mercyActive.phase
+  ∈ {kneel,wait}）；② SPARE（H 键：分数↑、拾取物↑、mercySpares=1）；③ KILL（真实战斗管线击杀
+  投降敌：mercyKills=1）；④ FLEE（窗口超时：mercyFlees=1）；⑤ 每波一次（mercyDone 门控置真）；
+  ⑥ Second Wind 期间不触发（mercyActive 始终 null）；⑦ 真人对局（forceMercy 起投降→H 键 spare，
+  端到端零 pageerror）。注册 `mercy` project。
+- 官方 CI **5/5 绿**（desktop×3 + 移动横/竖）。
+- dev 回归：depth3/laststand4/burst8/variety24（含 bossvariety4/variety2 10）/swarm3/bridge2/
+  boss3 **48/48 绿**；magnet 单测中 "drop far outside range stays put" 一次失败为**已知 flaky**
+  （Round 14 notes 已记录"magnet 一过性 flaky，单独重跑 3/3 稳过"），单独重跑 magnet **3/3 绿**——
+  非本轮回归。
+- ASCII+imgstat 抓帧确认：投降帧 cyan=8684（白旗+聚光灯+MERCY 横幅）、realplay 帧 cyan=13669+
+  green=855（金/白粒子风暴 + 投降敌轮廓 + 白旗布均可见），全程零 pageerror。
+
+### 趣味评估（创意总监视角）
+| 维度 | 改前 | 改后 |
+|---|---|---|
+| 类型颠覆 | 无（杀光一切的唯一动词） | 投降→三选一，动词被打破 |
+| 首次反应 | 无 | 2 秒"等等我该怎么办"真暂停 |
+| 波结尾多样性 | 每波同形（全杀） | 残暴/仁慈/黑暗/逃跑 四种可能 |
+| 情绪 | 仅支配 | 支配 + 仁慈 + 愧疚 + 错失 |
+| 故事性 | "打到 wave N" | "我放了第 7 波所有人" / "我杀了投降的家伙" |
+| 火柴人美术用法 | 骨骼动画 | 跪/鞠躬/双手举起 = 骨骼的情绪表达 |
+诚实保留：① 趣味是结构/机制代理指标 + 真机遥测 + ASCII 抓帧，**非真人手感**，"伦理暂停"是
+基于类型规范的设计推断而非实测；② RNG+每波 1 次+45%+低血量门控 ⇒ 短局可能整局不见一次，
+首次触发即是意义，若遥测显示"从不出现"可上调 CHANCE；③ forceMercy 钩子绕过 mercyDone 用于
+确定性测试，自然路径仍受每波 gate 约束。
+

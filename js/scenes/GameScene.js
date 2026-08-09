@@ -102,6 +102,16 @@ export class GameScene extends Phaser.Scene {
     this.burstWave = 0;          // current expanding-wave radius (for draw + AoE)
     this.bursts = 0;             // count of Overdrives unleashed this run (telemetry)
 
+    // MERCY 「The Coward's End」state. One surrender per wave (mercyDone gates
+    // the trigger); mercyActive holds the enemy + the wait-window timer while
+    // the player decides spare/kill/ignore. Counts feed run telemetry.
+    this.mercyActive = null;     // { enemy, t } while a surrender is in progress
+    this.mercyDone = false;      // per-wave: at most one surrender per wave
+    this.mercySpares = 0;        // run telemetry: spares chosen
+    this.mercyKills = 0;         // run telemetry: surrendering enemies killed
+    this.mercyFlees = 0;         // run telemetry: windows that expired (enemy fled)
+    this._mercyKillVeil = 0;     // brief desaturate pulse after a surrender-kill
+
     // difficulty preset (chosen on the title screen; persists)
     const diffKey = this.registry.get('difficulty') || 'normal';
     this.diff = DIFFICULTY[diffKey] || DIFFICULTY.normal;
@@ -137,6 +147,7 @@ export class GameScene extends Phaser.Scene {
       dir: 0, jumpPressed: false, jumpHeld: false,
       punchPressed: false, kickPressed: false,
       burstPressed: false,
+      sparePressed: false,
       touchActive: false, touchDir: 0, jumpHeldTouch: false,
     };
     this._setupKeyboard();
@@ -239,6 +250,24 @@ export class GameScene extends Phaser.Scene {
           return { split: after > before, spawnlings: after };
         },
         setFrenzy: (on) => { this.eventFrenzy = !!on; return this.eventFrenzy; },
+        // MERCY: force the trigger conditions for deterministic testing. Brings
+        // the last living enemy to low HP, marks the wave eligible, and starts
+        // the surrender on it (bypassing the RNG + count checks). Returns the
+        // enemy (or null if no eligible candidate).
+        forceMercy: (hpFrac) => {
+          const e = this.enemies.find((x) => !x.dead && !x.isBoss && !x.departed);
+          if (!e) return null;
+          e.health = Math.min(e.health, Math.max(1, Math.floor(e.maxHealth * (hpFrac != null ? hpFrac : 0.2))));
+          this.mercyDone = false;
+          this._startMercyOn(e);
+          return e;
+        },
+        spareEnemy: () => this._spareEnemy(),
+        expireMercy: () => { if (this.mercyActive) this.mercyActive.t = CONFIG.MERCY.WAIT_TIME + 1; return !!this.mercyActive; },
+        mercyState: () => {
+          const a = this.mercyActive;
+          return a ? { phase: a.enemy.surrender.phase, t: a.t, departed: a.enemy.departed } : null;
+        },
         // SECOND WIND: force-enter the broken last-stand, force a reform, and
         // fast-forward the window's timer so the expiry path is testable.
         enterSecondWind: () => { if (!this.player.broken && !this.player.dead) { this.player._enterBroken(); return true; } return false; },
@@ -284,6 +313,7 @@ export class GameScene extends Phaser.Scene {
       punch: k.addKey('J'),
       kick: k.addKey('K'),
       burst: k.addKey(CONFIG.BURST.KEY),
+      spare: k.addKey('H'),
     };
     const resume = () => this.audio && this.audio.resume();
     this.keys.jump.on('down', () => { resume(); c.jumpPressed = true; });
@@ -292,6 +322,7 @@ export class GameScene extends Phaser.Scene {
     this.keys.punch.on('down', () => { resume(); c.punchPressed = true; });
     this.keys.kick.on('down', () => { resume(); c.kickPressed = true; });
     this.keys.burst.on('down', () => { resume(); c.burstPressed = true; });
+    this.keys.spare.on('down', () => { resume(); c.sparePressed = true; });
     k.on('keydown-ESC', () => this._togglePause());
   }
 
@@ -589,6 +620,10 @@ export class GameScene extends Phaser.Scene {
     this.isBossWave = (n % CONFIG.BOSS.WAVE_EVERY === 0);
     this._resetEventFlags();
     this.activeEvent = null;
+    // MERCY: one potential surrender per wave — reset the gate at wave start.
+    // Also clear any half-resolved mercy from the previous wave (safety).
+    this.mercyDone = false;
+    this.mercyActive = null;
     if (this.isBossWave) {
       // boss wave: a single climactic elite — no filler spawns, no event remix.
       this.spawnQueue = 1;
@@ -1143,7 +1178,7 @@ export class GameScene extends Phaser.Scene {
     const F = CONFIG.FEEL;
     let hits = 0;
     for (const e of this.enemies) {
-      if (e.dead) continue;
+      if (e.dead || !e.isHittable()) continue;
       if (Math.abs(e.x - p.x) > B.RADIUS) continue;
       hits++;
       const dmg = e.isBoss ? B.BOSS_DAMAGE : B.DAMAGE;
@@ -1222,6 +1257,139 @@ export class GameScene extends Phaser.Scene {
   _scoreMul() {
     const base = (this.mods && this.mods.scoreMul) || 1;
     return this.rageT > 0 ? base * CONFIG.CONTENT.PICKUP.RAGE_SCORE_MUL : base;
+  }
+
+  // ---- MERCY 「The Coward's End」 ----
+  // The surprising genre-subversion beat. Per-frame trigger check: when exactly
+  // one eligible enemy remains, it's at/below the HP fraction, and the wave
+  // hasn't already had a surrender, roll once. If the roll passes, tell the
+  // enemy to kneel (it calls _onSurrenderStart back). Gating keeps it scarce.
+  _maybeStartMercy() {
+    if (this.mercyDone || this.mercyActive) return;
+    if (!this.waveActive || this.spawnQueue > 0) return;
+    if (this.isBossWave) return;
+    if (this.player.broken) return;            // don't stack two signature beats
+    const M = CONFIG.MERCY;
+    if (this.wave < M.MIN_WAVE) return;
+    const living = this.enemies.filter((e) => !e.dead && !e.departed);
+    if (living.length !== 1) return;
+    const e = living[0];
+    if (e.isBoss) return;
+    if (M.EXCLUDED.indexOf(e.variant) !== -1) return;
+    if (e.surrender) return;
+    if (e.health > e.maxHealth * M.HP_FRAC) return;
+    // eligible — roll once and mark per-wave so it can't re-roll this wave.
+    this.mercyDone = true;
+    if (Math.random() > M.CHANCE) return;      // roll failed: this wave's last enemy fights to the death
+    this._startMercyOn(e);
+  }
+
+  _startMercyOn(e) {
+    this.mercyDone = true;
+    e._startSurrender();                        // enemy calls this._onSurrenderStart back
+  }
+
+  // Enemy._startSurrender calls this so the scene sets up the wait window +
+  // the "MERCY?" prompt the instant the kneel begins.
+  _onSurrenderStart(e) {
+    this.mercyActive = { enemy: e, t: 0 };
+    this.ui.banner('MERCY?', '#eaf4ff');
+    // a soft cue: a brief music duck (if the audio engine supports it) + a
+    // slow-mo beat so the moment lands. Slow-mo is small so play isn't disrupted.
+    this.slowmo = Math.max(this.slowmo, 0.25);
+    if (this.audio && this.audio.setMusicIntensity) this.audio.setMusicIntensity('menu');
+  }
+
+  _restoreMusicAfterMercy() {
+    if (this.audio && this.audio.setMusicIntensity) {
+      this.audio.setMusicIntensity(this.isBossWave ? 'boss' : 'combat');
+    }
+  }
+
+  // player chose SPARE (H key / touch button). Generous bonus + guaranteed
+  // pickup + the emotional climax. Enemy bows + walks off; departed flag stops
+  // it blocking wave clear.
+  _spareEnemy() {
+    const a = this.mercyActive;
+    if (!a || !a.enemy || !a.enemy.surrender) return false;
+    const e = a.enemy;
+    // only valid during the kneel/wait window — ignore once departed/fleeing
+    if (e.departed || e.surrender.phase === 'flee' || e.surrender.phase === 'depart') return false;
+    const M = CONFIG.MERCY;
+    const bonus = Math.round(M.BONUS_PER_WAVE * this.wave * this._scoreMul());
+    this.score += bonus;
+    this.mercySpares++;
+    // guaranteed pickup (weighted). Magnet delivers it. A "spare" should feel
+    // generous — better than the kill would have been.
+    const roll = Math.random();
+    const w = M.PICKUP_WEIGHTS;
+    let type = 'health';
+    if (roll > w.health && roll > w.health + w.rage) type = 'score';
+    else if (roll > w.health) type = 'rage';
+    const dropX = clamp(e.x, CONFIG.WALL_LEFT + 30, CONFIG.WALL_RIGHT - 30);
+    this.pickups.push(new Pickup(this, dropX, CONFIG.GROUND_Y - 40, type));
+    // payoff feedback: slow-mo + soft ring + gold/white particles + banner.
+    this.slowmo = Math.max(this.slowmo, M.SPARE_SLOWMO);
+    if (this._impactRing) this._impactRing(e.x, e.y - 60, 0xeaf4ff, { life: 0.5, maxR: 150, width: 7 });
+    this.burst(e.x, e.y - 60, 0xffd23f, 18);
+    this.burst(e.x, e.y - 60, 0xffffff, 12);
+    this.ui.banner('MERCY  +' + bonus, '#6bff9e');
+    this.ui.floatText('+MERCY', e.x, e.y - 180, '#eaf4ff', 24);
+    if (this.audio) { this.audio.combo && this.audio.combo(12); }
+    e._bow();
+    this.mercyActive = null;
+    this._restoreMusicAfterMercy();
+    this._updateHUD();
+    return true;
+  }
+
+  // window expired with no choice — the enemy loses hope and flees. No reward,
+  // no penalty; a small comedic beat. Counts as a wave-clear once it leaves.
+  _expireMercy() {
+    const a = this.mercyActive;
+    if (!a) return;
+    const e = a.enemy;
+    this.mercyFlees++;
+    this.ui.floatText('\u2026coward', e.x, e.y - 180, '#8a94a6', 20);
+    e._flee();
+    this.mercyActive = null;
+    this._restoreMusicAfterMercy();
+    this._updateHUD();
+  }
+
+  // tick the wait window each frame (called from update while mercyActive).
+  _tickMercy(dt) {
+    const a = this.mercyActive;
+    if (!a) return;
+    a.t += dt;
+    if (a.t >= CONFIG.MERCY.WAIT_TIME) this._expireMercy();
+  }
+
+  // killed a surrendering enemy — the "dark" beat. Normal kill rewards still
+  // apply (handled by _onPlayerHit's usual path); this just layers the
+  // acknowledgment. No punishment — killing is the default, not a sin.
+  _registerMercyKill(e) {
+    if (!e.surrender || e.departed) return;
+    this.mercyKills++;
+    this.mercyActive = null;
+    this.ui.floatText('\u2026', e.x, e.y - 180, '#5a6478', 26);
+    // brief desaturate pulse: a short, low-intensity red-edge veil using the
+    // existing veilLayer (drawn faintly for ~0.5s). Reuses the broken-state
+    // veil painter at low alpha for a "the game saw that" beat.
+    this._mercyKillVeil = 0.5;
+    this._restoreMusicAfterMercy();
+  }
+
+  _drawMercyKillVeil() {
+    if (!this._mercyKillVeil || this._mercyKillVeil <= 0) { this._mercyKillVeil = 0; return; }
+    const g = this.veilLayer;
+    if (!g) return;
+    const a = clamp01(this._mercyKillVeil / 0.5) * 0.35;
+    g.fillStyle(0x0b0e16, a * 0.6);
+    g.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
+    // thin gray inner border (melancholy, not the red of broken-state)
+    g.lineStyle(8, 0x5a6478, a * 0.4);
+    g.strokeRect(40, 40, CONFIG.WIDTH - 80, CONFIG.HEIGHT - 80);
   }
 
   // ---- supply drop event ----
@@ -1426,7 +1594,7 @@ export class GameScene extends Phaser.Scene {
       const dmg = Math.round(phb.dmg * outMul);
       const eff = (outMul === 1) ? phb : { x: phb.x, y: phb.y, w: phb.w, h: phb.h, swing: phb.swing, dmg, kb: phb.kb, pause: phb.pause, from: phb.from };
       for (const e of this.enemies) {
-        if (e.dead || e.lastSwing === p.swingId) continue;
+        if (e.dead || !e.isHittable() || e.lastSwing === p.swingId) continue;
         if (aabb(eff, e.bodyBox())) {
           e.lastSwing = p.swingId;
           // record the connection so the player's whiff-penalty logic knows this
@@ -1459,6 +1627,14 @@ export class GameScene extends Phaser.Scene {
   _onPlayerHit(enemy, hb, killed) {
     const F = CONFIG.FEEL;
     const heavy = hb.kb > 400;
+    // MERCY: killing a surrendering enemy is the "dark choice" — normal kill
+    // rewards still apply (the function proceeds), but layer a brief gray
+    // desaturate pulse + "…" so the act is acknowledged. No punishment. Only
+    // counts during the kneel/wait choice window (post-spare the enemy is
+    // invulnerable, so this never fires then).
+    if (killed && enemy.surrender && (enemy.surrender.phase === 'kneel' || enemy.surrender.phase === 'wait')) {
+      this._registerMercyKill(enemy);
+    }
     // extra hitstop for weight on heavy connecting hits (stacks on the attack's
     // base HIT_PAUSE). The kill branch adds more below.
     this.hitPause = Math.max(this.hitPause, hb.pause + (heavy ? F.PAUSE.HEAVY : 0));
@@ -1788,6 +1964,10 @@ export class GameScene extends Phaser.Scene {
     if (c.kickPressed) { p_tryAttack(this, 'kick'); c.kickPressed = false; ob.kick = true; }
     // OVERDRIVE: a full meter + L (or the touch BURST button) unleashes the wave.
     if (c.burstPressed) { this._tryBurst(); c.burstPressed = false; }
+    // MERCY: H (or the touch SPARE button) honors a surrendering enemy. Only
+    // acts if a surrender window is open; otherwise the input is a no-op so a
+    // stray keypress during normal combat does nothing.
+    if (c.sparePressed) { this._spareEnemy(); c.sparePressed = false; }
 
     // slow-motion right after a kill
     let stepDt = dt;
@@ -1816,7 +1996,7 @@ export class GameScene extends Phaser.Scene {
           this.spawnTimer = rand(gap[0], gap[1]);
         }
       } else {
-        const alive = this.enemies.filter((e) => !e.dead).length;
+        const alive = this.enemies.filter((e) => !e.dead && !e.departed).length;
         if (alive === 0) {
           this.waveActive = false;
           // RETENTION: shorter between-wave gap in the first few waves so the
@@ -1924,6 +2104,13 @@ export class GameScene extends Phaser.Scene {
       if (this.wave1TruceT > CONFIG.RETENTION.WAVE1_TRUCE_TIME) this._endWave1Truce();
     }
 
+    // MERCY: check the trigger each frame (no-op unless exactly one eligible
+    // low-HP enemy remains) and tick any open wait window toward expiry/flee.
+    this._maybeStartMercy();
+    this._tickMercy(stepDt);
+    // decay the brief desaturate pulse that follows a surrender-kill
+    if (this._mercyKillVeil > 0) this._mercyKillVeil = Math.max(0, this._mercyKillVeil - dt);
+
     // death transition
     if (this.player.dead && !this.gameOver) {
       this.gameOver = true;
@@ -1936,6 +2123,9 @@ export class GameScene extends Phaser.Scene {
     this._updateRings(dt);
     this._updateTrails(dt);
     this._updateCamera(dt);
+    // MERCY kill veil layers on top of (or instead of) the Second Wind veil —
+    // a brief gray desaturate pulse that says "the game saw that".
+    this._drawMercyKillVeil();
 
     this._updateHUD();
   }
@@ -1970,6 +2160,7 @@ export class GameScene extends Phaser.Scene {
       event: this.activeEvent,
       burst: this.player.burst, burstMax: this.player.burstMax, burstReady: this.player.burst >= this.player.burstMax && !this.bursting,
       broken: this.player.broken, brokenT: this.player.brokenT, brokenMax: this.player.brokenMax,
+      mercyActive: !!this.mercyActive,
     });
     if (typeof window !== 'undefined') {
       window.__stickman = {
@@ -2015,6 +2206,15 @@ export class GameScene extends Phaser.Scene {
         burstReady: this.player.burst >= this.player.burstMax && !this.bursting,
         bursting: !!this.bursting,
         bursts: this.bursts,
+        // MERCY telemetry
+        mercyActive: this.mercyActive ? {
+          phase: this.mercyActive.enemy.surrender ? this.mercyActive.enemy.surrender.phase : null,
+          t: this.mercyActive.t,
+          waitMax: CONFIG.MERCY.WAIT_TIME,
+        } : null,
+        mercySpares: this.mercySpares,
+        mercyKills: this.mercyKills,
+        mercyFlees: this.mercyFlees,
         // generative-soundtrack state (observable for tests / debug)
         music: this.audio && this.audio.getMusicState ? this.audio.getMusicState() : null,
       };

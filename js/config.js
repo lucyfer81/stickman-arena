@@ -180,6 +180,29 @@ export const CONFIG = {
     REFORM_SLOWMO: 0.35,      // slow-mo seconds on the reform climax
   },
 
+  // ---- MERCY 「The Coward's End」— surprising genre-subversion mechanic ----
+  // The last living enemy of a non-boss wave, when reduced below HP_FRAC, may
+  // SURRENDER (kneel, raise hands, wave a white flag). The player then chooses:
+  // SPARE (H key / touch button) for a generous bonus + guaranteed pickup, KILL
+  // (attack as normal) for normal rewards + a dark "…" beat, or IGNORE for a
+  // comedic flee. Subverts the brawler core verb ("kill everything") and makes
+  // each wave end differently. Gating keeps it a scarce story, never routine.
+  MERCY: {
+    HP_FRAC: 0.30,         // last enemy must be at or below this HP fraction
+    CHANCE: 0.45,          // probability the roll passes (checked once)
+    MIN_WAVE: 2,           // wave 1 is the teaching truce; don't stack climaxes
+    WAIT_TIME: 2.8,        // seconds the player has to choose before it flees
+    KNEEL_TIME: 0.45,      // transition into kneeling
+    BOW_TIME: 0.6,         // bow animation when spared
+    BONUS_PER_WAVE: 150,   // score bonus = this * wave * scoreMul (strictly > WAVE CLEAR 100)
+    SPARE_SLOWMO: 0.35,    // slow-mo seconds on the mercy climax
+    FLEE_SPEED: 520,       // off-screen speed when the window expires
+    // excluded variants — already-scripted climaxes, not eligible to surrender
+    EXCLUDED: ['boss', 'bossCaster', 'vanguard'],
+    // guaranteed pickup weights on a SPARE (magnet delivers). sum needn't be 1.
+    PICKUP_WEIGHTS: { health: 0.50, rage: 0.25, score: 0.25 },
+  },
+
   // Boss waves — every BOSS_WAVE_EVERY-th wave spawns a single elite boss
   // with a telegraphed ground-slam that emits shockwaves the player must jump.
   BOSS: {
