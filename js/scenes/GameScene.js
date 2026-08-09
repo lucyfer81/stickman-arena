@@ -20,6 +20,7 @@ export class GameScene extends Phaser.Scene {
     this.shadows = this.add.graphics().setDepth(5);
     this.fxLayer = this.add.graphics().setDepth(20); // hit sparks drawn direct
     this.ringLayer = this.add.graphics().setDepth(21); // expanding impact rings
+    this.trailLayer = this.add.graphics().setDepth(20.5); // limb motion trails (above sparks, below rings)
     this.shockLayer = this.add.graphics().setDepth(19); // boss ground-slam shockwaves
     this.burstLayer = this.add.graphics().setDepth(22); // OVERDRIVE radial wave (above rings)
     this.debrisLayer = this.add.graphics().setDepth(9); // SECOND WIND shattered-limb props
@@ -34,9 +35,23 @@ export class GameScene extends Phaser.Scene {
     this.meteorWarnings = []; // telegraph markers before a meteor impact
     this.debris = [];          // SECOND WIND: shattered limb props (arm ragdoll)
     this.rings = [];          // expanding impact rings { x, y, t, life, maxR, width, color }
-    this.camBoost = 0;        // punch-zoom boost (zoom = 1 + boost); decays each frame
+    this.trails = [];         // limb motion-trail samples { x, y, t, life, color, w }
+    this.camBoost = 0;        // punch-zoom boost (zoom = CAM_BASE_ZOOM + boost); decays each frame
+    this.camComboBoost = 0;   // combo-escalation: stacks per hit, slow-decay tau (separate from camBoost)
     this.camShoveX = 0;       // directional camera recoil (px), eased back to 0
     this.camShoveY = 0;
+    // IMPULSE SHAKE state — a decaying sinusoid that replaces Phaser's white-
+    // noise cameras.main.shake. The sinusoidal ring + directional bias reads
+    // as a weighty impact, not a buzz. _shake() pushes a new impulse; the
+    // amplitude decays exponentially over shakeLife. dirX/Y bias the shake
+    // along the blow axis so a horizontal hit shakes the camera sideways.
+    this.shakeAmp = 0;
+    this.shakeLife = 0.001;   // total life of the current shake (avoid /0)
+    this.shakeT = 0;          // remaining life
+    this.shakeFreq = 34;
+    this.shakeDirX = 0;
+    this.shakeDirY = 0;
+    this.shakePhase = Math.random() * 1000; // continuous phase (no snap-reset on re-trigger)
     this.boss = null;            // live boss reference (for the HP bar + payoff)
     this.isBossWave = false;     // every 5th wave is a single-boss encounter
     this.score = 0;
@@ -304,6 +319,34 @@ export class GameScene extends Phaser.Scene {
       quantity: 8,
       emitting: false,
     }).setDepth(6);
+    // DEBRIS emitter — dark body-chunks on K.O. (no additive blend: these are
+    // solid shards, not light). Gravity makes them arc and bounce off the
+    // ground line, selling the dismemberment-fantasy read. Separate from the
+    // hitEmitter so a kill can layer BOTH bright sparks AND dark chunks.
+    const D = CONFIG.FEEL.DEBRIS;
+    this.debrisEmitter = this.add.particles(0, 0, 'dot', {
+      speed: { min: D.SPEED.min, max: D.SPEED.max },
+      angle: { min: 220, max: 320 },   // bias upward (Phaser y is down)
+      scale: { start: D.SCALE.start, end: D.SCALE.end },
+      lifespan: { min: D.LIFE.min, max: D.LIFE.max },
+      gravityY: D.GRAVITY,
+      tint: D.COLOR,
+      quantity: D.COUNT,
+      emitting: false,
+    }).setDepth(15);   // below the bright hit sparks but above ground line
+    // LAUNCH-SPARK emitter — upward-biased additive sparks for the K.O. "pop".
+    // Negative gravityY (Phaser y is down) means they decelerate going up and
+    // accelerate back down, arcing over the corpse. Reads as the body launching.
+    this.launchEmitter = this.add.particles(0, 0, 'dot', {
+      speed: { min: D.SPARK_SPEED.min, max: D.SPARK_SPEED.max },
+      angle: { min: 230, max: 310 },   // upward fan
+      scale: { start: 0.9, end: 0 },
+      lifespan: { min: 280, max: 560 },
+      gravityY: D.SPARK_BIAS,
+      blendMode: 'ADD',
+      quantity: D.SPARK_COUNT,
+      emitting: false,
+    }).setDepth(30);
   }
 
   _togglePause() {
@@ -334,12 +377,50 @@ export class GameScene extends Phaser.Scene {
     if (shoveY) this.camShoveY = clamp(this.camShoveY + shoveY, 0, F.SHOVE.DOWN * 1.4);
   }
 
+  // COMBO ESCALATION: each consecutive landed hit adds a small zoom bump that
+  // decays on its own slow tau. So the framing tightens through a chain — "the
+  // camera knows you're cooking". Independent from the per-hit camBoost (which
+  // is a snappy one-shot). No-op outside combos (single hits barely move it).
+  _comboZoomStep() {
+    const Z = CONFIG.FEEL.ZOOM;
+    this.camComboBoost = Math.min(Z.COMBO_STEP_MAX, this.camComboBoost + Z.COMBO_STEP);
+  }
+
+  // IMPULSE SHAKE — a decaying sinusoid that replaces Phaser's white-noise
+  // cameras.main.shake. The tonal ring at low frequency reads as a weighty hit
+  // (not a buzz), and the directional bias means a horizontal blow shakes the
+  // camera along the blow axis. dirX/dirY need NOT be normalized — we use the
+  // sign for axis bias only. A new impulse overrides the current shake if its
+  // effective amplitude exceeds the residual; otherwise it's ignored (so a
+  // machine-gun punch doesn't accumulate shake into nausea).
+  _shake(amp, life, freq, dirX = 0, dirY = 0) {
+    const S = CONFIG.FEEL.SHAKE;
+    // residual effective amplitude (decayed value right now)
+    const residual = this.shakeAmp * (this.shakeT / this.shakeLife);
+    if (amp < residual - S.CUTOFF) return; // not stronger than what's playing — skip
+    this.shakeAmp = amp;
+    this.shakeLife = Math.max(0.001, life);
+    this.shakeT = this.shakeLife;
+    this.shakeFreq = freq || 34;
+    this.shakeDirX = dirX;
+    this.shakeDirY = dirY;
+  }
+
   // expanding impact ring — the classic impact tell. Drawn persistently on its
   // own layer (survives the spark's short clear window) and fades as it grows.
   _impactRing(x, y, color, spec) {
     this.rings.push({
       x, y, t: 0, life: spec.life, maxR: spec.maxR, width: spec.width, color,
     });
+  }
+
+  // push a limb motion-trail sample. Called from the entity's active-frame
+  // render path. Each sample is a fading streak anchor; _updateTrails draws
+  // lines between successive samples of the same source (swing trail effect).
+  _pushTrail(x, y, color, key) {
+    const T = CONFIG.FEEL.TRAIL;
+    this.trails.push({ x, y, t: 0, life: T.LIFE, color, key, w: T.WIDTH });
+    if (this.trails.length > T.MAX * 3) this.trails.shift(); // hard cap
   }
 
   // resolve FEEL.RING spec by event key (with a safe fallback)
@@ -361,24 +442,74 @@ export class GameScene extends Phaser.Scene {
 
   _updateCamera(dt) {
     const F = CONFIG.FEEL;
-    // exponential ease-back to rest
-    const k = Math.exp(-dt / F.ZOOM.TAU);
+    const Z = F.ZOOM;
+    // exponential ease-back to rest for the one-shot punch-zoom
+    const k = Math.exp(-dt / Z.TAU);
     this.camBoost *= k;
+    // combo escalation decays on its own slow tau so the build holds across a chain
+    this.camComboBoost *= Math.exp(-dt / Z.COMBO_TAU);
     this.camShoveX *= k;
     this.camShoveY *= k;
     if (this.camBoost < 0.0008) this.camBoost = 0;
+    if (this.camComboBoost < 0.0008) this.camComboBoost = 0;
     if (Math.abs(this.camShoveX) < 0.05) this.camShoveX = 0;
     if (this.camShoveY < 0.05) this.camShoveY = 0;
+
+    // IMPULSE SHAKE: decaying sinusoid along the bias axis + a touch of noise.
+    // Continuous phase across re-triggers (no snap-reset glitch). Cutoff kills
+    // sub-pixel shimmer at the tail.
+    let shx = 0, shy = 0;
+    if (this.shakeT > 0) {
+      this.shakeT -= dt;
+      const frac = Math.max(0, this.shakeT / this.shakeLife); // 1 -> 0 linearly
+      // easeIn decay (frac^2) snaps the tail off fast — the punch is at the start
+      const amp = this.shakeAmp * frac * frac;
+      if (amp > F.SHAKE.CUTOFF) {
+        this.shakePhase += dt * this.shakeFreq * Math.PI * 2;
+        const tone = Math.sin(this.shakePhase);
+        const tone2 = Math.cos(this.shakePhase * 1.17 + 0.7); // de-coherent second axis
+        const noise = (Math.random() * 2 - 1);
+        const mix = F.SHAKE.NOISE_MIX;
+        const dirLen = Math.hypot(this.shakeDirX, this.shakeDirY) || 0;
+        if (dirLen > 0.01) {
+          // directional bias: shake more ALONG the impulse axis (sinusoid) +
+          // a smaller perpendicular component (the second tone). This makes a
+          // sideways blow shake the camera sideways, which reads correctly.
+          const dx = this.shakeDirX / dirLen, dy = this.shakeDirY / dirLen;
+          const along = tone * (1 - mix) + noise * mix;
+          const perp = tone2 * (1 - mix * 0.5);
+          shx = (dx * along * 1.25 + (-dy) * perp * 0.45) * amp;
+          shy = (dy * along * 1.25 + dx * perp * 0.45) * amp;
+        } else {
+          // omnidirectional: two orthogonal tones + a noise blend
+          shx = (tone * (1 - mix) + noise * mix) * amp;
+          shy = (tone2 * (1 - mix * 0.6) + (Math.random() * 2 - 1) * mix * 0.6) * amp;
+        }
+      } else {
+        this.shakeAmp = 0;
+      }
+    }
+
     const cam = this.cameras.main;
-    cam.setZoom(1 + this.camBoost);
-    // only shove while zoomed in (headroom); clamp to the px the zoom buys so we
-    // never reveal the world rectangle's edge.
-    const headX = (cam.width * this.camBoost) * 0.5 * 0.8;
-    const headY = (cam.height * this.camBoost) * 0.5 * 0.8;
-    cam.setScroll(
-      clamp(this.camShoveX, -headX, headX),
-      clamp(this.camShoveY, -headY, headY)
-    );
+    // BASE ZOOM stays at 1.0 so the world exactly fills the viewport at rest
+    // (no edge reveal). The combined boost (one-shot + combo escalation) zooms
+    // IN, which buys pan headroom. The headroom formula (1 - 1/zoom)/2 gives
+    // the exact per-side pan budget in world px; the 0.85 factor is a safety
+    // margin so sub-pixel rounding never reveals an edge.
+    const boost = this.camBoost + this.camComboBoost;
+    const zoom = F.CAM_BASE_ZOOM + boost;
+    cam.setZoom(zoom);
+    const headroom = zoom > 1 ? cam.width * (1 - 1 / zoom) * 0.5 * 0.85 : 0;
+    const headY = zoom > 1 ? cam.height * (1 - 1 / zoom) * 0.5 * 0.85 : 0;
+    // LOOK-AHEAD: drift toward the player's facing so the blow reads in the
+    // direction of travel. Only active when zoom bought headroom (i.e. during/
+    // after impact moments). Scales up slightly with the active zoom.
+    const look = (this.player && !this.player.dead && headroom > 0)
+      ? this.player.facing * Math.min(F.CAM_LOOKAHEAD * (1 + boost * 3), headroom * 0.45)
+      : 0;
+    const sx = clamp(this.camShoveX + shx + look, -headroom, headroom);
+    const sy = clamp(this.camShoveY + shy, -headY, headY);
+    cam.setScroll(sx, sy);
   }
 
   _updateRings(dt) {
@@ -400,6 +531,39 @@ export class GameScene extends Phaser.Scene {
       }
     }
     this.rings = this.rings.filter((r) => r.t < r.life);
+  }
+
+  // LIMB MOTION TRAIL — samples pushed during a swing's active frames are
+  // connected into a streak per source key (e.g. "p:fist" for player's fist).
+  // Each streak fades from tail (oldest) to head (newest), giving the swing a
+  // motion-blur arc that makes the strike read at a glance. Purely visual.
+  _updateTrails(dt) {
+    const g = this.trailLayer;
+    g.clear();
+    if (!this.trails.length) return;
+    // group by key so multiple concurrent swings (rare but possible) don't cross
+    const groups = new Map();
+    for (const tr of this.trails) {
+      tr.t += dt;
+      if (tr.t >= tr.life) continue;
+      if (!groups.has(tr.key)) groups.set(tr.key, []);
+      groups.get(tr.key).push(tr);
+    }
+    for (const [, list] of groups) {
+      // list is in push order (oldest first). Draw line segments between
+      // successive samples with alpha = (1 - t/life), tapering the width.
+      for (let i = 0; i < list.length - 1; i++) {
+        const a = list[i], b = list[i + 1];
+        const lifeFrac = 1 - ((a.t + b.t) * 0.5) / a.life;
+        if (lifeFrac <= 0) continue;
+        const segT = i / Math.max(1, list.length - 1); // 0 tail -> 1 head
+        const alpha = lifeFrac * (0.25 + 0.65 * segT);
+        const w = a.w * (0.4 + 0.7 * segT);
+        g.lineStyle(w, a.color, alpha);
+        g.lineBetween(a.x, a.y, b.x, b.y);
+      }
+    }
+    this.trails = this.trails.filter((tr) => tr.t < tr.life);
   }
 
   // ---- waves ----
@@ -431,7 +595,8 @@ export class GameScene extends Phaser.Scene {
       const variant = (Math.round(n / CONFIG.BOSS.WAVE_EVERY) % 2 === 1) ? 'slammer' : 'caster';
       const name = CONFIG.BOSS.NAME[variant];
       this.ui.banner('BOSS WAVE ' + n + ' \u2014 ' + name, '#ff3b30');
-      this.cameras.main.shake(220, 0.012);
+      const SB = CONFIG.FEEL.SHAKE.BOSS_ENTRY;
+      this._shake(SB.amp, SB.life, SB.freq, 0, 1);
     } else {
       // rare-event director: occasionally remix this wave for variety. Rolled
       // once here; the chosen event sets flags that spawnOne()/update() honor.
@@ -442,7 +607,8 @@ export class GameScene extends Phaser.Scene {
         ev.apply(this);
         this.ui.banner(ev.name, ev.color);
         this.ui.floatText(ev.desc, this.player.x, this.player.y - 220, ev.color, 22);
-        this.cameras.main.shake(150, 0.01);
+        const SE = CONFIG.FEEL.SHAKE.EVENT;
+        this._shake(SE.amp, SE.life, SE.freq);
       }
       const extra = (this.mods && this.mods.extraPerWave) || 0;
       const base = 2 + Math.floor(n * 0.9) + extra + (this.eventExtraSpawns || 0);
@@ -601,7 +767,8 @@ export class GameScene extends Phaser.Scene {
     this.ui.banner('THE BOSS IS ENRAGED!', '#ff6f5c');
     this._punchZoom(CONFIG.FEEL.ZOOM.HURT, 0, 0);
     this._impactRing(boss.x, boss.y - 80, 0xff3b30, this._ringSpec('HEAVY'));
-    this.cameras.main.shake(220, 0.016);
+    const SB = CONFIG.FEEL.SHAKE.BOSS_ENTRY;
+    this._shake(SB.amp, SB.life, SB.freq, 0, 1);
     this.audio && this.audio.bigHit();
     const n = CONFIG.BOSS.ENRAGE_SUMMONS;
     const kind = (CONFIG.BOSS.ENRAGE_SUMMONS_KIND && CONFIG.BOSS.ENRAGE_SUMMONS_KIND[boss.bossKind]) || 'grunt';
@@ -859,7 +1026,8 @@ export class GameScene extends Phaser.Scene {
     this.burst(x, y - 60, 0xff7a00, 46);
     this.burst(x, y - 60, 0xffd23f, 28);
     this.dustBurst(x, CONFIG.GROUND_Y, 22);
-    this.cameras.main.shake(210, 0.024);
+    const SBL = CONFIG.FEEL.SHAKE.BLAST;
+    this._shake(SBL.amp, SBL.life, SBL.freq, 0, 1);
     this.audio && this.audio.bigHit();
   }
 
@@ -904,7 +1072,8 @@ export class GameScene extends Phaser.Scene {
         this._punchZoom(CONFIG.FEEL.ZOOM.BLAST, 0, CONFIG.FEEL.SHOVE.DOWN);
         this.burst(w.x, CONFIG.GROUND_Y - 20, 0xff7a00, 36);
         this.dustBurst(w.x, CONFIG.GROUND_Y, 22);
-        this.cameras.main.shake(170, 0.018);
+        const SBL = CONFIG.FEEL.SHAKE.BLAST;
+        this._shake(SBL.amp * 0.8, SBL.life, SBL.freq, 0, 1);
         this.audio && this.audio.bigHit();
         w.dead = true;
       } else {
@@ -928,7 +1097,8 @@ export class GameScene extends Phaser.Scene {
   _startRage(time) {
     this.rageT = time;
     this.rageMax = time;
-    this.cameras.main.shake(100, 0.01);
+    const SE = CONFIG.FEEL.SHAKE.EVENT;
+    this._shake(SE.amp * 0.6, SE.life, SE.freq);
     this.audio && this.audio.combo(12);
   }
 
@@ -960,7 +1130,8 @@ export class GameScene extends Phaser.Scene {
     this.slowmo = Math.max(this.slowmo, B.WINDUP);
     this._impactRing(p.x, p.y - 70, 0xffd23f, { life: 0.30, maxR: 90, width: 5 });
     this._punchZoom(CONFIG.FEEL.ZOOM.HURT, 0, 0);
-    this.cameras.main.shake(120, 0.012);
+    const SBK = CONFIG.FEEL.SHAKE.BOSS_KILL;
+    this._shake(SBK.amp * 0.5, SBK.life * 0.7, SBK.freq);
     this.audio && this.audio.combo && this.audio.combo(18);
   }
 
@@ -999,7 +1170,8 @@ export class GameScene extends Phaser.Scene {
     this._punchZoom(F.ZOOM.BOSS_KILL, 0, F.SHOVE.DOWN);
     this.slowmo = Math.max(this.slowmo, 0.40);
     this.hitPause = Math.max(this.hitPause, 0.12);
-    this.cameras.main.shake(300, 0.024);
+    const SBK = F.SHAKE.BOSS_KILL;
+    this._shake(SBK.amp, SBK.life, SBK.freq, 0, 1);
     this.burst(p.x, p.y - 70, 0xffd23f, 56);
     this.burst(p.x, p.y - 70, 0xffffff, 30);
     this.dustBurst(p.x, CONFIG.GROUND_Y, 26);
@@ -1120,7 +1292,8 @@ export class GameScene extends Phaser.Scene {
     this._impactRing(p.x, p.y - 80, 0xff3b30, this._ringSpec('BOSS_KILL'));
     this._impactRing(p.x, p.y - 80, 0xffffff, this._ringSpec('HURT'));
     this._punchZoom(F.ZOOM.BOSS_KILL, 0, F.SHOVE.DOWN);
-    this.cameras.main.shake(320, 0.028);
+    const SBK = F.SHAKE.BOSS_KILL;
+    this._shake(SBK.amp * 1.05, SBK.life, SBK.freq, 0, 1);
     this.burst(p.x, p.y - 70, 0xff3b30, 50);
     this.burst(p.x, p.y - 70, 0xeaf4ff, 26);
     // spawn the detached right arm as a short-lived physics prop
@@ -1160,7 +1333,8 @@ export class GameScene extends Phaser.Scene {
     this._impactRing(p.x, p.y - 80, 0xffd23f, this._ringSpec('BOSS_KILL'));
     this._impactRing(p.x, p.y - 80, 0x6bff9e, this._ringSpec('KILL'));
     this._punchZoom(F.ZOOM.BOSS_KILL, 0, 0);
-    this.cameras.main.shake(260, 0.02);
+    const SBK = F.SHAKE.BOSS_KILL;
+    this._shake(SBK.amp * 0.85, SBK.life, SBK.freq, 0, 1);
     this.burst(p.x, p.y - 70, 0xffd23f, 56);
     this.burst(p.x, p.y - 70, 0x6bff9e, 30);
     this.ui.banner('REFORMED!  +' + bonus, '#6bff9e');
@@ -1324,8 +1498,13 @@ export class GameScene extends Phaser.Scene {
     // particles scale with weight; the fist-tint burst reads as a chunk of the
     // enemy getting knocked loose.
     this.burst(enemy.x, hitY, enemy.v.palette.fist, heavy ? 20 : 13);
-    // snappier shake than before (was 0.006/0.012) so each connection has bite.
-    this.cameras.main.shake(heavy ? 90 : 60, heavy ? 0.014 : 0.009);
+    // COMBO ESCALATION: each consecutive hit nudges the framing tighter (decays
+    // on a slow tau) so a chain visibly builds intensity. Single taps barely move it.
+    this._comboZoomStep();
+    // impulse shake with directional bias — a sideways blow shakes sideways.
+    const SH = F.SHAKE;
+    const shSpec = heavy ? SH.HEAVY : SH.HIT;
+    this._shake(shSpec.amp, shSpec.life, shSpec.freq, dirX, heavy ? 0.3 : 0);
     this.audio && this.audio.hit();
     if (this.combo > 1) this.audio && this.audio.combo(this.combo);
     this.ui.floatText('+' + gain, enemy.x, enemy.y - 120 * enemy.scale, '#ffd23f');
@@ -1363,7 +1542,8 @@ export class GameScene extends Phaser.Scene {
         this.firstBloodDone = true;
         this.slowmo = Math.max(this.slowmo, CONFIG.RETENTION.FIRST_BLOOD_SLOWMO);
         this.hitPause = Math.max(this.hitPause, CONFIG.RETENTION.FIRST_BLOOD_PAUSE);
-        this.cameras.main.shake(190, 0.016);
+        const SK = F.SHAKE.KILL;
+        this._shake(SK.amp, SK.life, SK.freq, dirX, 0.5);
         this.ui.banner('FIRST BLOOD!', '#ff8a3d');
         this.ui.floatText('FIRST BLOOD!', this.player.x, this.player.y - 220, '#ff8a3d', 30);
         // FIRST-MINUTE v2 (B1): first-blood Overdrive bonus so the flagship
@@ -1384,9 +1564,22 @@ export class GameScene extends Phaser.Scene {
         this._impactRing(bx, by, 0xffd23f, this._ringSpec('BOSS_KILL'));
         this._impactRing(bx, by, 0xff3b30, this._ringSpec('KILL'));
         this._punchZoom(F.ZOOM.BOSS_KILL, 0, F.SHOVE.DOWN);
-        this.cameras.main.shake(300, 0.026);
+        const SBK = F.SHAKE.BOSS_KILL;
+        this._shake(SBK.amp, SBK.life, SBK.freq, dirX, 1);
         this.burst(bx, by, 0xffd23f, 64);
         this.burst(bx, by, 0xff3b30, 44);
+        // KILL LAYER: dark debris chunks + upward launch-sparks sell the giant
+        // toppling. The launchEmitter is upward-biased additive (energy
+        // escaping); debrisEmitter is dark gravity-bound chunks (body breaking).
+        if (this.debrisEmitter) {
+          this.debrisEmitter.setPosition(bx, by);
+          this.debrisEmitter.explode(28);
+        }
+        if (this.launchEmitter) {
+          this.launchEmitter.setPosition(bx, by);
+          this.launchEmitter.tint = 0xffd23f;
+          this.launchEmitter.explode(36);
+        }
         const bonus = Math.round(CONFIG.BOSS.SCORE * scoreMul);
         this.score += bonus;
         this.ui.banner('BOSS DOWN!  +' + bonus, '#ffd23f');
@@ -1403,7 +1596,22 @@ export class GameScene extends Phaser.Scene {
       this._punchZoom(F.ZOOM.KILL, 0, 0);
       this.camShoveX = clamp(this.camShoveX - dirX * F.SHOVE.KILL, -F.SHOVE.BOSS, F.SHOVE.BOSS);
       this.burst(kx, ky, enemy.v.palette.accent, 30);
-      this.cameras.main.shake(120, 0.014);
+      // KILL LAYER: dark debris chunks (body breaking) + upward launch sparks
+      // (energy/launch pop) on top of the standard accent-color burst. The
+      // debris uses gravity so chunks arc and fall; the launch sparks use
+      // negative gravity (additive) so they arc up then fall back — the body
+      // visually "pops" off the ground on K.O.
+      if (this.debrisEmitter) {
+        this.debrisEmitter.setPosition(kx, ky);
+        this.debrisEmitter.explode(CONFIG.FEEL.DEBRIS.COUNT);
+      }
+      if (this.launchEmitter) {
+        this.launchEmitter.setPosition(kx, ky);
+        this.launchEmitter.tint = enemy.v.palette.accent;
+        this.launchEmitter.explode(CONFIG.FEEL.DEBRIS.SPARK_COUNT);
+      }
+      const SK = F.SHAKE.KILL;
+      this._shake(SK.amp, SK.life, SK.freq, dirX, 0.6);
       this.audio && this.audio.bigHit();
       this.slowmo = 0.18;
       this.ui.floatText('K.O. +' + gain2, enemy.x, enemy.y - 150 * enemy.scale, enemy.v.palette.fist, 26);
@@ -1449,7 +1657,15 @@ export class GameScene extends Phaser.Scene {
     const dirX = enemy ? Math.sign(this.player.x - enemy.x) || 1 : (hb && hb.from != null ? Math.sign(this.player.x - hb.from) || 1 : 1);
     this._impactRing(hx, hy, 0xff3b30, this._ringSpec('HURT'));
     this._punchZoom(F.ZOOM.HURT, dirX, 0);
-    this.cameras.main.shake(170, 0.022);
+    // hurt shake is the biggest per-frame shake tier (HURT) — getting hit must
+    // rattle the camera far more than landing a hit does, so damage feels costly.
+    const SHU = F.SHAKE.HURT;
+    this._shake(SHU.amp, SHU.life, SHU.freq, dirX, 0.4);
+    // a hurt moment also nudges the player's own body via squash — sells recoil.
+    if (this.player && CONFIG.FEEL.STRETCH) {
+      const s = CONFIG.FEEL.STRETCH.HEAVY;
+      this.player.pushStretch(dirX !== 0 ? s.sy : s.sx, dirX !== 0 ? s.sx : s.sy);
+    }
     this.burst(hx, hy, COLORS.player.accent, 20);
     this._spark(hx, hy, '#ff3b30', dirX);
     this.audio && this.audio.bigHit();
@@ -1501,7 +1717,13 @@ export class GameScene extends Phaser.Scene {
     const label = tierNames[this.combo] || ('COMBO x' + this.combo);
     this.ui.banner(label + '  +' + bonus, '#ffd23f');
     this.audio && this.audio.combo(this.combo + 4);
-    this.cameras.main.shake(140, 0.012);
+    // combo tiers escalate the shake: each higher milestone is a bigger pop.
+    const SHE = CONFIG.FEEL.SHAKE.HEAVY;
+    const tierIdx = CONFIG.COMBO_TIERS.indexOf(this.combo);
+    const ampBoost = 1 + tierIdx * 0.18;
+    this._shake(SHE.amp * ampBoost, SHE.life * 1.1, SHE.freq);
+    // a milestone also punches the zoom slightly — a visible "yes!" framing beat.
+    this._punchZoom(CONFIG.FEEL.ZOOM.HEAVY * 0.7, 0, 0);
   }
 
   // ---- update ----
@@ -1518,6 +1740,7 @@ export class GameScene extends Phaser.Scene {
       // ring expands across the frozen frame and the zoom holds at its peak.
       // dt=0 here keeps the camera boost/shove from decaying mid-freeze.
       this._updateRings(dt);
+      this._updateTrails(dt);
       this._updateCamera(0);
       this._updateHUD();
       return;
@@ -1711,6 +1934,7 @@ export class GameScene extends Phaser.Scene {
     // feedback layers run on real time so the juice always feels the same,
     // independent of gameplay slow-mo.
     this._updateRings(dt);
+    this._updateTrails(dt);
     this._updateCamera(dt);
 
     this._updateHUD();

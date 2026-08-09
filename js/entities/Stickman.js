@@ -1,4 +1,5 @@
 import { pulse, clamp01, easeOut, lerp } from '../utils/math.js';
+import { CONFIG } from '../config.js';
 
 // Local coordinate system: origin at feet midpoint, +y is UP, +x is forward.
 // Render converts to graphics coords (y down) and applies facing flip.
@@ -188,7 +189,50 @@ export class Stickman extends Phaser.GameObjects.Graphics {
                           // which would double-multiply (a*a) and make flicker/fade
                           // fade to a^2 — far too faint.
     this.setDepth(10);
+    // SQUASH & STRETCH: scaleX/scaleY deformation driven by the entity on
+    // impacts / swing windup / hard landings. Decays back to (1,1) every frame
+    // via tickStretch(). Origin (feet) keeps the body planted while it squishes.
+    // We track a separate _baseScaleX/Y because enemies use a non-unit base
+    // scale (boss = 1.6) — the squash must compose ON TOP of the base, not
+    // overwrite it. Override setScale to keep the base in sync.
+    this._baseScaleX = 1;
+    this._baseScaleY = 1;
+    this.squashX = 1;
+    this.squashY = 1;
     scene.add.existing(this);
+  }
+
+  // keep our base scale in sync when the entity is resized (Enemy uses this in
+  // its constructor to scale bosses up to 1.6). The final rendered scale is
+  // base * squash, applied in render().
+  setScale(x, y) {
+    if (y === undefined) y = x;
+    this._baseScaleX = x;
+    this._baseScaleY = y;
+    this.scaleX = x;
+    this.scaleY = y;
+    return this;
+  }
+
+  // Push a squash deformation: sx/sy are the target scale ratios (e.g. 0.86 wide
+  // / 1.16 tall for a horizontal hit). Decays exponentially back to (1,1) so the
+  // snap-back is automatic. A new push takes priority if it's stronger than the
+  // residual deformation, so a fast combo chains deformations naturally.
+  pushStretch(sx, sy) {
+    // blend with current residual — if the new push is more deformation, take it.
+    const curDef = Math.max(Math.abs(this.squashX - 1), Math.abs(this.squashY - 1));
+    const newDef = Math.max(Math.abs(sx - 1), Math.abs(sy - 1));
+    if (newDef >= curDef) { this.squashX = sx; this.squashY = sy; }
+  }
+
+  // Frame-tick the deformation back toward neutral. Call from the entity update.
+  tickStretch(dt) {
+    const T = (CONFIG && CONFIG.FEEL && CONFIG.FEEL.STRETCH.TAU) || 0.07;
+    const k = Math.exp(-dt / T);
+    this.squashX = 1 + (this.squashX - 1) * k;
+    this.squashY = 1 + (this.squashY - 1) * k;
+    if (Math.abs(this.squashX - 1) < 0.005) this.squashX = 1;
+    if (Math.abs(this.squashY - 1) < 0.005) this.squashY = 1;
   }
 
   // Convert local (y-up) to graphics coords with facing flip.
@@ -197,6 +241,10 @@ export class Stickman extends Phaser.GameObjects.Graphics {
   }
 
   render(anim) {
+    // apply squash-&-stretch composed with the entity's base scale (origin =
+    // feet midpoint, so the body deforms while staying planted on the ground).
+    this.scaleX = this._baseScaleX * this.squashX;
+    this.scaleY = this._baseScaleY * this.squashY;
     const pose = computePose(anim);
     const p = this.P.bind(this);
     const pal = this.palette;

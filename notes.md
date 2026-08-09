@@ -730,3 +730,81 @@ Top10与修复顺序详见 DESIGN.md Round 10。本轮先修 #1 资源循环（�
 这轮杠杆是让**每一波都可能不一样**且**每种敌人逼不同应对**：冲锋要跳/侧移、医疗兵要
 优先击杀、分裂要过杀、冰面要控速、神龛要争夺；加 4 个事件让波次形状不再单调（玻璃/夹击/
 瘟疫/祝福）。重复感显著下降。仍是代理指标+遥测，非真人手感。
+
+## Round 14 — 游戏手感 Pass 2（纯反馈增强，零新机制）
+
+用户明确要求：**只增强打击满意度，不加新机制**。聚焦 7 维：命中效果/屏震/冲击反馈/
+粒子/预备动作/攻击时机/相机运动。约束：depth 套件锁定的攻击时序（punch 0.31s /
+kick 0.46s 连接、0.62s 空挥）与伤害（11/16）一字未改，boss 大招固定 50 不动。
+
+### 改动（5 文件）
+- `config.js`：`FEEL` 块大扩展。
+  - **SHAKE**（新）：8 事件档（HIT/HEAVY/HURT/KILL/BOSS_KILL/SLAM/BLAST/BOSS_ENTRY/EVENT），
+    每档 amp/life/freq + 共享 NOISE_MIX=0.35 + CUTOFF=0.25。低频正弦=重量感，非 Phaser 噪声 buzz。
+  - **STRETCH**（新）：HIT/HEAVY/KILL/WINDUP/ACTIVE/LAND 五种挤压规格 + TAU=0.07 反弹。
+  - **TRAIL**（新）：拳头/脚 active 帧的运动残影（LIFE=0.16s, WIDTH=6, MAX=14 采样）。
+  - **DEBRIS**（新）：K.O. 暗色身体碎片（重力下落）+ 向上爆发火花（负 gravityY=发射感）。
+  - **CAM_BASE_ZOOM=1.0**（最终值）+ **CAM_LOOKAHEAD=18**：相机只在冲击期 zoom-in 时获得 pan
+    headroom，看向玩家朝向（"撞向打击方向"）。基础保持 1.0 不露世界边缘。
+  - **ZOOM.COMBO_STEP/MAX/TAU**（新）：每次连命中 +0.006 zoom，慢衰减（0.45s tau），上限 0.045——
+    连段时画面"知道你在打连招"。
+  - **ZOOM/SHOVE/RING/PAUSE 全部上调**（如 HIT 0.018→0.024、KILL 0.050→0.066、BOSS_KILL
+    0.095→0.115），冲击峰值更强但 MAX 从 0.12→0.135 防眩晕。
+- `Stickman.js`：新 `squashX/Y`（默认 1）+ `_baseScaleX/Y`（默认 1，boss=1.6）。`pushStretch(sx,sy)`
+  推入形变（同向取更大者），`tickStretch(dt)` 指数衰减回 1。重写 `setScale` 同步 base。`render()`
+  应用 `scaleX = base*squash`。
+- `Player.js`：`tryAttack` 触发 windup 形变（1.10/0.90 蹲伏蓄力）+ 地面 dustBurst（5 粒）；active
+  峰值推 ACTIVE 形变（1.08/0.94 拉伸）。硬落地（vy>720）触发 LAND 形变（1.18/0.82 拍扁）+ _shake。
+  `_render` 在 active 帧采样拳头/脚世界坐标推到 `scene._pushTrail`。所有 update 分支调 tickStretch。
+- `Enemy.js`：`takeHit` 按 hit 重量推形变（HIT/HEAVY/KILL 三档）。hit flash 重做为分层（外青光晕
+  + 白热核心 + 品红打击点 + 白描边）— 比 1 层白盘冲击感强 4 倍。bodyBox/getHitbox 改读
+  `_baseScaleX` 而非 live scaleX（避免挤压帧命中盒漂移，保战斗稳定）。`update` 顶部统一 tickStretch。
+- `GameScene.js`：
+  - 新增 `_shake(amp,life,freq,dirX,dirY)` —— **替换全部 cameras.main.shake 调用**（19 处）。
+    衰减正弦 + 噪声混合，方向偏置（横向打击→横向震）。相位连续不重置，cutoff 杀尾抖。
+  - 新增 `_comboZoomStep()` —— 连击 zoom 升级入口。
+  - 新增 `_pushTrail(x,y,color,key)` + `_updateTrails(dt)` —— 按 key 分组的运动残影绘制
+    （tail→head alpha 与宽度递增）。
+  - 新增 `debrisEmitter` + `launchEmitter` —— K.O. 双层粒子（暗碎片+上向火花）。
+  - 重写 `_updateCamera` —— 精确 headroom 公式 `(1-1/zoom)/2*0.85`，look-ahead 仅在 zoom-in 时生效，
+    shake+shove+look 组合钳制在 headroom 内（永不露边）。
+  - 命中/受伤/击杀/Boss 击杀/大招收尾/破碎/重塑分支全部接入新 shake + 形变 + 分层粒子。
+  - hitpause 分支也调 `_updateTrails`（冻结帧残影继续划过=经典 impact tell）。
+
+### 7 维改进映射
+| 维度 | 改动 |
+|---|---|
+| 命中效果 | 分层 chromatic hit flash（青/白/品红/描边）+ 方向火花保留 |
+| 屏震 | 自定义衰减正弦 impulse shake 替换 Phaser 噪声（重量级而非 buzz） |
+| 冲击反馈 | squash-&-stretch（敌人被命中形变，玩家挥击形变）+ hitpause 微增 |
+| 粒子 | K.O. 双层（暗碎片+上向火花）+ 残影 trail + windup dust |
+| 预备动作 | 玩家挥击 windup 蹲伏（1.10/0.90）+ active 拉伸（1.08/0.94）+ windup dust puff |
+| 攻击时机 | 时序一字未改（depth 套件锁定）；改的是体感——蹲伏+拉伸让挥击弧可读 |
+| 相机运动 | impulse shake + combo-escalation zoom + impact-moment look-ahead |
+
+### 验证
+- 官方 CI **5/5 绿**（desktop×3 + 移动横/竖）。
+- dev 套件 **17/17 绿**（depth3/laststand4/magnet3/qa7）—— 摄像头修正后无回归。
+- 早前 dev 跑（修摄像头前）**48/48 + 43/44**（magnet 一过性 flaky，单独重跑 3/3 稳过）。
+- 新增 `tests/feel14-visual.spec.js`（注册 `feel14` project）：6 场景截图 + ASCII/imgstat
+  抓帧。确认：idle 角像素=(9,11,18)（=背景渐变，无 #0b0e16 露边）；K.O. 帧 cyan=14767
+  + bright=4114（碎片+环+launch 三层粒子可读）；overdrive 帧 cyan=17979 + yellow=2203
+  （金/青粒子风暴可读）；boss-slam 帧 red=14725（Boss+slam 环）；全程零 pageerror。
+- 摄像头探针确认 idle 时 zoom=1.0/scrollX=0（世界矩形精准填充，无边缘伪影）。
+
+### 设计决策（多解取最爽的）
+- **base zoom 取舍**：最初用 0.965 微 zoom-out 买 pan 余量做 idle look-ahead，实测角像素
+  =（11,14,22）= Phaser `backgroundColor: '#0b0e16'` 露边。改回 1.0，look-ahead 仅在冲击期生效
+  ——这恰好是相机该"撞向打击"的时刻，idle 不漂移反而更稳。
+- **headroom 公式精确化**：旧 `(cam.width * camBoost) * 0.5 * 0.8` 是近似；新 `(1-1/zoom)/2*0.85`
+  是精确值+安全系数。两者在 boost 小时几乎一致，但新版支持 base≠1 的组合（即便最终 base=1）。
+- **enemy bodyBox 用 base scale**：boss 缩放 1.6 + 挤压时 live scaleX 会瞬变（1.6*0.86=1.376），
+  命中盒会跟着缩——快连击可能 miss。改读 `_baseScaleX` 把命中盒和形变解耦，战斗稳定。
+- **shake 不叠**：新 impulse 比残差弱则跳过（machine-gun punch 不累积致眩）；更强则覆盖。
+  招式间隔自然，每发都脆。
+
+### 诚实保留
+- 趣味是结构性/机制性代理指标 + 真机遥测 + ASCII 抓帧，**非真人手感**。
+- 真人手感需 A/B 盲测（无法在本环境做）；改动都基于公开 game-feel 原理（Disney 12 原则的
+  squash/anticipation/follow-through + Vlambeer 的 impulse shake + Jan Willem Nijman 的 hit-stop）。
+- look-ahead 比理想弱（仅在 zoom-in 时生效）——若未来愿意重做背景边界扩展，可恢复 idle 漂移。

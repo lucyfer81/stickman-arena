@@ -53,6 +53,7 @@ module.exports = defineConfig({
     project('retention',   /retention\.spec\.js/,     60000),
     project('variety',     /variety.*\.spec\.js/,     90000),
     project('volume',      /volume\.spec\.js/,       30000),
+    project('feel14',      /feel14-visual\.spec\.js/, 120000),
   ],
   webServer: {
     command: 'python3 -m http.server 8080',

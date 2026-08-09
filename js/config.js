@@ -343,43 +343,131 @@ export const CONFIG = {
   // ---- GAME FEEL (juice pass) ----
   // Pure feedback tuning — no mechanic/damage/timing changes. Magnitudes are
   // small by design: stacked across a combo they build intensity without nausea.
+  // Round 14 (this pass): adds an impulse-shake model (decaying sinusoid, far
+  // weightier than Phaser's white-noise shake), camera look-ahead with a slight
+  // base zoom-out so the camera can actually move, combo-escalation zoom, a
+  // fist/foot trail during active swing frames, squash-&-stretch on impacts and
+  // swing windup, and layered kill particles (debris + launch sparks).
   FEEL: {
+    // Camera base zoom. Held at 1.0 so the world rectangle exactly fills the
+    // viewport at rest (no edge reveal). Camera pan/shove/shake are clamped to
+    // the headroom the current zoom-IN buys, so they only move during impact
+    // moments — which is exactly when the camera should "lean into" the blow.
+    CAM_BASE_ZOOM: 1.0,
+    // Camera look-ahead — applied during zoom-in (impact) moments: the view
+    // drifts toward the player's facing so the blow reads in the direction of
+    // travel. Scales up with the active zoom so bigger hits lean further.
+    CAM_LOOKAHEAD: 18,
     // camera punch-zoom: boost snaps up on impact, eases back exponentially.
-    // camBoost decays via boost *= exp(-dt / TAU); applied as zoom = 1 + boost.
+    // camBoost decays via boost *= exp(-dt / TAU); applied as zoom = CAM_BASE_ZOOM + boost.
     ZOOM: {
-      HIT:        0.018,   // any landed hit
-      HEAVY:      0.034,   // kick / heavy-knockback hit (kb > 400)
-      HURT:       0.030,   // player took a hit
-      KILL:       0.050,   // enemy K.O.
-      BOSS_KILL:  0.095,   // boss death — the run's strongest feedback peak
-      SLAM:       0.045,   // boss ground-slam impact
-      BLAST:      0.052,   // bomber / meteor detonation
-      TAU:        0.075,   // exponential time-constant (smaller = snappier return)
-      MAX:        0.12,    // hard cap so long combos can't over-zoom
+      HIT:        0.024,   // any landed hit (was 0.018 — bumped for more bite)
+      HEAVY:      0.044,   // kick / heavy-knockback hit (kb > 400) (was 0.034)
+      HURT:       0.040,   // player took a hit (was 0.030)
+      KILL:       0.066,   // enemy K.O. (was 0.050)
+      BOSS_KILL:  0.115,   // boss death — the run's strongest feedback peak (was 0.095)
+      SLAM:       0.058,   // boss ground-slam impact (was 0.045)
+      BLAST:      0.064,   // bomber / meteor detonation (was 0.052)
+      TAU:        0.072,   // exponential time-constant (slightly snappier, was 0.075)
+      MAX:        0.135,   // hard cap so long combos can't over-zoom (was 0.12)
+      // COMBO ESCALATION: each consecutive landed hit stacks a small additive
+      // zoom bump that decays on its own slow tau. So a 10-hit chain visibly
+      // tightens the framing — "the camera knows you're cooking". Per-hit gain
+      // is tiny; the peak only reads during real combo chains, not single taps.
+      COMBO_STEP:    0.006,   // additive per landed hit
+      COMBO_STEP_MAX: 0.045,  // max stacked escalation (decays with its own tau)
+      COMBO_TAU:     0.45,    // slow decay so the build holds across the combo
     },
     // directional camera shove (px, recoils opposite the blow). Clamped to the
     // headroom the current zoom buys so it never reveals world edges.
     SHOVE: {
-      HIT:    4,
-      HEAVY:  8,
-      KILL:   12,
-      BOSS:   18,
-      DOWN:   10,   // +y shove on big downward/slam impacts (sells weight)
+      HIT:    5,    // was 4
+      HEAVY:  10,   // was 8
+      KILL:   15,   // was 12
+      BOSS:   22,   // was 18
+      DOWN:   13,   // +y shove on big downward/slam impacts (was 10)
+    },
+    // IMPULSE SHAKE — replaces Phaser's cameras.main.shake (which is per-frame
+    // white noise and reads as a buzz, not a hit). Here each impact pushes a
+    // decaying sinusoid at a low frequency (weighty "ring") with a touch of
+    // noise mixed in for organic feel. Directional bias means a horizontal blow
+    // shakes the camera along the blow axis, not omnidirectionally.
+    SHAKE: {
+      // px amplitude at impact moment; decays exponentially over LIFE.
+      HIT:       { amp: 3.2,  life: 0.16, freq: 38 },
+      HEAVY:     { amp: 5.5,  life: 0.22, freq: 34 },
+      HURT:      { amp: 7.0,  life: 0.28, freq: 30 },   // getting hurt shakes more
+      KILL:      { amp: 9.0,  life: 0.34, freq: 28 },
+      BOSS_KILL: { amp: 15.0, life: 0.55, freq: 24 },   // big ringing topple
+      SLAM:      { amp: 11.0, life: 0.42, freq: 22 },   // low freq = heavy weight
+      BLAST:     { amp: 12.0, life: 0.40, freq: 26 },
+      BOSS_ENTRY:{ amp: 6.0,  life: 0.30, freq: 30 },
+      EVENT:     { amp: 4.0,  life: 0.22, freq: 32 },
+      // mix of orthogonal sinusoid vs noise (0 = pure tone, 1 = pure noise).
+      // 0.35 keeps a tonal ring dominant but breaks the math-perfect pattern.
+      NOISE_MIX: 0.35,
+      // amplitude below this is snapped to 0 (avoids sub-pixel jitter shimmer).
+      CUTOFF:    0.25,
     },
     // expanding impact ring drawn from the strike point.
     RING: {
-      HIT:        { life: 0.22, maxR: 46, width: 4 },
-      HEAVY:      { life: 0.28, maxR: 66, width: 5 },
-      HURT:       { life: 0.26, maxR: 58, width: 5 },
-      KILL:       { life: 0.36, maxR: 96, width: 6 },
-      BOSS_KILL:  { life: 0.52, maxR: 170, width: 8 },
-      SLAM:       { life: 0.40, maxR: 120, width: 6 },
-      BLAST:      { life: 0.40, maxR: 130, width: 6 },
+      HIT:        { life: 0.24, maxR: 52,  width: 4 },   // was 46
+      HEAVY:      { life: 0.32, maxR: 76,  width: 5 },   // was 66
+      HURT:       { life: 0.28, maxR: 64,  width: 5 },   // was 58
+      KILL:       { life: 0.40, maxR: 110, width: 6 },   // was 96
+      BOSS_KILL:  { life: 0.58, maxR: 190, width: 8 },   // was 170
+      SLAM:       { life: 0.44, maxR: 138, width: 6 },   // was 120
+      BLAST:      { life: 0.44, maxR: 146, width: 6 },   // was 130
     },
     // extra hitstop (s) layered on top of the attack's base HIT_PAUSE for weight.
     PAUSE: {
-      KILL:      0.035,   // a normal K.O.
-      HEAVY:     0.020,   // heavy connecting hit
+      KILL:      0.045,   // a normal K.O. (was 0.035)
+      HEAVY:     0.024,   // heavy connecting hit (was 0.020)
+    },
+    // SQUASH & STRETCH — Disney principle: impacts deform the body along the
+    // blow axis for ~120ms, then ease back. The single biggest "weight" tell
+    // for a hit. The scene pushes these values onto the target's squashX/Y;
+    // each entity decays them in its own update via the Stickman base class.
+    STRETCH: {
+      // along-axis compression (1.0 = neutral). On a horizontal hit the body
+      // squishes horizontally (sx<1) and elongates vertically (sy>1).
+      HIT:        { sx: 0.86, sy: 1.16, life: 0.14 },
+      HEAVY:      { sx: 0.78, sy: 1.28, life: 0.18 },
+      KILL:       { sx: 0.70, sy: 1.40, life: 0.26 },
+      // ANTICIPATION: when the player starts a swing, the body squats (sx>1,
+      // sy<1) for the windup, storing energy. Drives the windup-phase squash.
+      WINDUP:     { sx: 1.10, sy: 0.90, life: 0.10 },
+      // ACTIVE stretch: at the peak of the swing the body elongates along the
+      // strike axis (sx>1, sy<1) for a "reaching" silhouette.
+      ACTIVE:     { sx: 1.08, sy: 0.94, life: 0.10 },
+      // hard-landing squash on the player after a fast fall.
+      LAND:       { sx: 1.18, sy: 0.82, life: 0.14 },
+      // exponential decay tau (smaller = snappier rebound).
+      TAU:        0.07,
+    },
+    // FIST / FOOT TRAIL — during a swing's active frames, sample the limb
+    // position each frame and draw a fading streak behind it. Reads as motion
+    // blur and makes the strike arc readable. Purely visual (no hitbox change).
+    TRAIL: {
+      LIFE:       0.16,   // seconds a trail sample lives
+      WIDTH:      6,      // streak line width
+      MAX:        14,     // max simultaneous samples (one per frame at 60fps in a 0.22s swing)
+    },
+    // KILL DEBRIS — on enemy K.O. a separate emitter spits dark body-chunks
+    // (gravity, no additive blend) for a dismemberment-fantasy read, plus a
+    // brief UPWARD-biased spark burst (launch feel — the body "pops").
+    DEBRIS: {
+      COUNT:      10,     // dark chunks per kill
+      SPEED:      { min: 120, max: 380 },
+      SCALE:      { start: 0.7, end: 0 },
+      LIFE:       { min: 360, max: 700 },
+      GRAVITY:    880,
+      COLOR:      0x1a1320,  // dark purple-black (sticks read as bone/shadow)
+      // upward sparks (additive, biased up) layered on top of the standard hit
+      // burst. The vertical bias sells the "launch" on a K.O.
+      SPARK_COUNT: 14,
+      SPARK_BIAS: -260,   // negative gravityY = upward bias (Phaser y is down)
+      SPARK_SPEED: { min: 220, max: 560 },
     },
   },
 };
