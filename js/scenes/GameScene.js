@@ -59,6 +59,23 @@ export class GameScene extends Phaser.Scene {
     this.firstBloodDone = false;     // FIRST BLOOD fires once on the run's first non-boss kill
     this.waveFirstSpawn = true;      // wave-2 first spawn is a vanguard mini-elite
     this.onboard = { move: false, jump: false, punch: false, kick: false, firstHit: false, t: 0 };
+    // FIRST-MINUTE RETENTION (v2) state. The wave-1 truce is now a SCENE-level
+    // gate (was per-enemy): while active, EVERY wave-1 enemy spawns passive so a
+    // confused/frozen first-timer can't be swarmed by the 2nd/3rd adds while the
+    // opening dummy holds its swing. Clears on the player's first landed hit OR
+    // after WAVE1_TRUCE_TIME — whichever comes first. AFK salvation window.
+    this.wave1Truce = true;
+    this.wave1TruceT = 0;
+    // FIRST-ACTION SCORE: one-shot bonuses for the very first observed inputs so
+    // the score climbs from second 1 (was 0 for the opening 3-5s — the most
+    // churn-prone moment to look stuck).
+    this.firstActionRewarded = { move: false, jump: false };
+    // EARLY HEAL: guarantees the health loop engages within ~30s for casuals/
+    // mobile even if RNG was cold. Drops a heal on the 3rd wave-1 kill if needed.
+    this.wave1KillCount = 0;
+    // OVERDRIVE SEED: start the meter part-charged so the flagship player-chosen
+    // climax lands inside the 60s window for casuals/mobile, not just hardcore.
+    this._burstSeeded = false;
     // round-5 content: rage buff + rare-event director state
     this.rageT = 0;
     this.rageMax = 1;
@@ -479,7 +496,10 @@ export class GameScene extends Phaser.Scene {
     // FIRST-TIME ASSIST: wave 1's opening enemy is a passive training dummy so a
     // confused first-timer gets a safe window to land their first punch (and the
     // FIRST BLOOD celebration) instead of bleeding out 0-score. Cleared on hit.
-    if (firstOfWave && n === 1) e.passive = true;
+    // FIRST-MINUTE v2: while the scene-level wave-1 truce is active, ALL wave-1
+    // enemies spawn passive — so the 2nd/3rd adds can't swarm a frozen player
+    // before the lesson lands. Cleared globally on first hit (see _endWave1Truce).
+    if (n === 1 && this.wave1Truce) e.passive = true;
     if (this.spawned && this.spawned[variant] != null) this.spawned[variant]++;
     // flank assignment: alternating sides, seeded by spawn side, so the pack
     // surrounds the player rather than stacking on one side. Base the slot on
@@ -1126,7 +1146,21 @@ export class GameScene extends Phaser.Scene {
     this._addBurst(CONFIG.BURST.ON_HIT);
     // RETENTION: first time the player damages an enemy — drives the teaching
     // callouts (hide the pre-contact pointer once they've actually landed a hit).
-    if (!this.onboard.firstHit) this.onboard.firstHit = true;
+    // FIRST-MINUTE v2: the first landed hit also ends the wave-1 truce — wave 1
+    // now fights back normally. The truce was the AFK/frozen-player salvation
+    // window; once the player has shown they can press J, the lesson has landed.
+    if (!this.onboard.firstHit) {
+      this.onboard.firstHit = true;
+      this._endWave1Truce();
+      // FIRST-MINUTE v2 (B2): first-landed-hit score bonus so the score climbs
+      // from second 1 (was 0 for the opening 3-5s). Stacks on the hit's own gain.
+      const fa = CONFIG.RETENTION;
+      const tip = Math.round((fa.FIRST_HIT_SCORE || 0) * this._scoreMul());
+      if (tip > 0) {
+        this.score += tip;
+        this.ui.floatText('FIRST HIT +' + tip, this.player.x, this.player.y - 250, '#6bff9e', 22);
+      }
+    }
     const mult = 1 + Math.floor((this.combo - 1) / 4) * 0.5;
     const scoreMul = this._scoreMul();
     const gain = Math.round(10 * mult * scoreMul);
@@ -1183,6 +1217,11 @@ export class GameScene extends Phaser.Scene {
         this.cameras.main.shake(190, 0.016);
         this.ui.banner('FIRST BLOOD!', '#ff8a3d');
         this.ui.floatText('FIRST BLOOD!', this.player.x, this.player.y - 220, '#ff8a3d', 30);
+        // FIRST-MINUTE v2 (B1): first-blood Overdrive bonus so the flagship
+        // player-chosen climax lands inside the 60s window. Pairs with the meter
+        // seed (Player START_METER) to put a ready Overdrive ~15-20s in for any
+        // player who lands a hit — casuals/mobile included.
+        this._addBurst(CONFIG.BURST.FIRST_BLOOD_BONUS || 0);
       }
       // BOSS payoff: a climactic moment — long slow-mo, big shake, banner,
       // guaranteed heal drop, huge score. Worth the climb.
@@ -1222,11 +1261,26 @@ export class GameScene extends Phaser.Scene {
       // chance to drop a pickup (more likely if player low). Bombers never drop
       // a heal-on-death (they leave a fire zone instead); rare rage drop otherwise.
       const dropChance = this.player.health < 40 ? 0.4 : 0.2;
+      let dropped = false;
       if (Math.random() < dropChance && this.player.health < this.player.maxHealth && enemy.variant !== 'bomber') {
         this.pickups.push(new Pickup(this, enemy.x, enemy.y - 60, 'health'));
+        dropped = true;
       } else if (enemy.variant !== 'bomber' && Math.random() < 0.04 && this.rageT <= 0) {
         // very rare rage drop from any non-boss kill
         this.pickups.push(new Pickup(this, enemy.x, enemy.y - 60, 'rage'));
+        dropped = true;
+      }
+      // FIRST-MINUTE v2 (B3): guaranteed early heal. RNG can stay cold for a
+      // whole wave — mobile/casual ended runs at 0 healed. A guaranteed heal on
+      // the Nth wave-1 kill (if HP<max) engages the health loop within ~30s for
+      // everyone. The magnet (Round 10) delivers it. Bombers exempt (fire zone).
+      if (!dropped && this.wave === 1 && enemy.variant !== 'bomber') {
+        this.wave1KillCount++;
+        const R = CONFIG.RETENTION;
+        if (this.wave1KillCount === (R.EARLY_HEAL_KILL || 3)
+            && this.player.health < this.player.maxHealth) {
+          this.pickups.push(new Pickup(this, enemy.x, enemy.y - 60, 'health'));
+        }
       }
     }
   }
@@ -1339,10 +1393,27 @@ export class GameScene extends Phaser.Scene {
     // jump key (W / Space / Up). It is cleared after player.update() below.
     const ob = this.onboard;
     ob.t += dt;
-    if (c.dir !== 0) ob.move = true;
+    // FIRST-MINUTE v2 (B2): first-action score bonuses so the number climbs from
+    // second 1 (was 0 for the opening 3-5s — the most churn-prone moment to look
+    // stuck). One-shot per run, wave-1 only. First-hit bonus lives in _onPlayerHit.
+    if (this.wave === 1 && !this.firstActionRewarded.move && c.dir !== 0) {
+      this.firstActionRewarded.move = true;
+      ob.move = true;
+      const tip = Math.round((CONFIG.RETENTION.FIRST_MOVE_SCORE || 0) * this._scoreMul());
+      if (tip > 0) { this.score += tip; this.ui.floatText('+' + tip, this.player.x, this.player.y - 200, '#35e1ff', 18); }
+    } else if (c.dir !== 0) {
+      ob.move = true;
+    }
+    if (this.wave === 1 && !this.firstActionRewarded.jump && c.jumpPressed) {
+      this.firstActionRewarded.jump = true;
+      ob.jump = true;
+      const tip = Math.round((CONFIG.RETENTION.FIRST_JUMP_SCORE || 0) * this._scoreMul());
+      if (tip > 0) { this.score += tip; this.ui.floatText('+' + tip, this.player.x, this.player.y - 200, '#35e1ff', 18); }
+    } else if (c.jumpPressed) {
+      ob.jump = true;
+    }
     if (c.punchPressed) { p_tryAttack(this, 'punch'); c.punchPressed = false; ob.punch = true; }
     if (c.kickPressed) { p_tryAttack(this, 'kick'); c.kickPressed = false; ob.kick = true; }
-    if (c.jumpPressed) ob.jump = true;
     // OVERDRIVE: a full meter + L (or the touch BURST button) unleashes the wave.
     if (c.burstPressed) { this._tryBurst(); c.burstPressed = false; }
 
@@ -1473,6 +1544,14 @@ export class GameScene extends Phaser.Scene {
       if (this.comboTimer <= 0) this.combo = 0;
     }
 
+    // FIRST-MINUTE v2: wave-1 truce countdown. If the player never engages, the
+    // truce ends after WAVE1_TRUCE_TIME — we can't hold their hand forever, and
+    // the teach hint has had a long window to land. Cleared earlier by first hit.
+    if (this.wave1Truce) {
+      this.wave1TruceT += dt;
+      if (this.wave1TruceT > CONFIG.RETENTION.WAVE1_TRUCE_TIME) this._endWave1Truce();
+    }
+
     // death transition
     if (this.player.dead && !this.gameOver) {
       this.gameOver = true;
@@ -1566,6 +1645,20 @@ export class GameScene extends Phaser.Scene {
         // generative-soundtrack state (observable for tests / debug)
         music: this.audio && this.audio.getMusicState ? this.audio.getMusicState() : null,
       };
+    }
+  }
+
+  // FIRST-MINUTE v2: end the wave-1 truce — clears the scene flag and un-blocks
+  // every currently-passive wave-1 enemy so the wave fights back. Idempotent.
+  // Called either from the first-hit path (player engaged) or the global timer
+  // (player never engaged — 12s salvation window elapsed). Per-enemy passive
+  // still self-expires on its own 5s timer as a local fallback AFTER the truce
+  // ends (see Enemy.update — gated on !scene.wave1Truce).
+  _endWave1Truce() {
+    if (!this.wave1Truce) return;
+    this.wave1Truce = false;
+    for (const e of this.enemies) {
+      if (!e.dead && e.passive) e.passive = false;
     }
   }
 

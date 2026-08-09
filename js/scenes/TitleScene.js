@@ -30,6 +30,15 @@ export class TitleScene extends Phaser.Scene {
     this.enemyDemo.facing = -1;
     this.t = 0;
 
+    // FIRST-MINUTE v2 (A2): a floating "J" tag that lights up next to the
+    // player's demo stickman every time it punches. The bottom controls line is
+    // ~400px away and easy to miss; this puts the keybinding right on the action
+    // so the J=punch association is unmissable before the player starts.
+    this.demoKey = this.add.text(cx - off + 70, CONFIG.GROUND_Y - 150, 'J', {
+      fontFamily: 'Arial Black', fontSize: '28px', color: '#ffd23f',
+      stroke: '#0b1a2a', strokeThickness: 6,
+    }).setOrigin(0.5).setAlpha(0);
+
     // difficulty (persists) — guarded: Safari private mode can throw on access
     let storedDiff = 'normal';
     try { storedDiff = localStorage.getItem('stickman_arena_diff') || 'normal'; } catch (e) {}
@@ -256,6 +265,13 @@ export class TitleScene extends Phaser.Scene {
     }
     this.demo.render(pAnim);
     this.enemyDemo.render(eAnim);
+    // FIRST-MINUTE v2 (A2): the J-tag glows on a player demo punch — keeps the
+    // keybinding pinned to the action so the title teaches J=punch by sight.
+    if (this.demoKey) {
+      const punching = playerAttacks && cycle > punchStart && cycle < punchEnd;
+      const a = punching ? (0.6 + 0.4 * Math.sin(this.t * 18)) : 0;
+      this.demoKey.setAlpha(a);
+    }
     this.subtitle.setAlpha(0.55 + 0.45 * (0.5 + 0.5 * Math.sin(this.t * 4)));
   }
 }

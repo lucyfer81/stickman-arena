@@ -13,6 +13,15 @@ const SKINS = {
     label: 'CYAN', palette: COLORS.player,
     unlock: { type: 'default' },
   },
+  // FIRST-MINUTE v2 (C1): a first-wave-clear skin. Achievable in <60s by anyone
+  // who survives the opening — bootstraps the meta-progression loop within a
+  // single short session. Every returning player has at least one near-term
+  // cosmetic they're working toward (or just earned). Ordered first in nextUnlock.
+  rookie: {
+    label: 'ROOKIE',
+    palette: { limb: 0xeaf4ff, joint: 0xc9d4e0, head: 0xffffff, accent: 0x9bb4c8, fist: 0xffd23f },
+    unlock: { type: 'waveclear', value: 1, desc: 'clear wave 1' },
+  },
   ember: {
     label: 'EMBER',
     palette: { limb: 0xff8a3d, joint: 0xffb88a, head: 0xffe0c8, accent: 0xff3b30, fist: 0xffd23f },
@@ -83,6 +92,10 @@ export const Meta = {
     const u = skin.unlock;
     switch (u.type) {
       case 'default': return true;
+      // FIRST-MINUTE v2 (C1): 'waveclear' — cleared wave N ⟺ reached wave N+1
+      // (bestWave is the wave the player died ON). Derived from bestWave so no
+      // new stat is needed; ROOKIE (clear wave 1) unlocks at bestWave >= 2.
+      case 'waveclear': return stats.bestWave >= u.value + 1;
       case 'wave': return stats.bestWave >= u.value;
       case 'kills': return stats.totalKills >= u.value;
       case 'score': return stats.bestScore >= u.value;
@@ -109,14 +122,17 @@ export const Meta = {
   // the in-run HUD goal chip and the game-over nudge. Returns null when all
   // skins are unlocked. Surfaces long-term progression DURING the first minute
   // (the moment of max churn), where it was previously invisible.
+  // FIRST-MINUTE v2 (C1): ROOKIE (clear wave 1) is first — a <60s unlock that
+  // bootstraps the meta loop within a single short session.
   nextUnlock(stats) {
     stats = stats || this.loadStats();
-    const ORDER = ['ember', 'toxic', 'gold', 'royal'];
+    const ORDER = ['rookie', 'ember', 'toxic', 'gold', 'royal'];
     for (const key of ORDER) {
       if (this.isSkinUnlocked(key, stats)) continue;
       const u = SKINS[key].unlock;
       let current = 0, text = '';
       switch (u.type) {
+        case 'waveclear': current = Math.max(0, stats.bestWave - 1); text = 'clear wave ' + u.value; break;
         case 'wave':  current = stats.bestWave;   text = 'reach wave ' + u.value; break;
         case 'kills': current = stats.totalKills; text = u.value + ' kills'; break;
         case 'combo': current = stats.bestCombo;  text = 'x' + u.value + ' combo'; break;

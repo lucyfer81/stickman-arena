@@ -609,3 +609,65 @@ Top10与修复顺序详见 DESIGN.md Round 10。本轮先修 #1 资源循环（�
 | 故事性 | "打到wave N" | "6个围上来，我引爆清场" |
 | 反击/逃生 | 仅Second Wind(0血) | Overdrive panic-button（满槽即可） |
 诚实保留：仍是代理指标+遥测，非真人手感；Boss固定50确保大招跳不过Boss战（设计意图）。下轮候选：把 Overdrive 触发数/最大连击引爆数接入 Meta 解锁（"曾一次引爆N敌"徽章），或给放大招加一段专属处决动画。
+
+## Round 12 — 首分钟留存：新手引导 / 奖励节奏 / 进度（专注留存）
+
+任务前提：**假设玩家只玩 60 秒**。分析首分钟体验、找出留/走原因、改进 onboarding / reward pacing / progression，**只做留存**。
+
+### 首分钟分析（DESIGN Round10/11 遥测 + 源码通读）
+**留下来的原因**：FIRST BLOOD(~3-5s第一个多巴胺峰值) / 连击层级+juice / 分数可见爬升 / OVERDRIVE槽期待感 / 目标chip("NEXT → wave5 · EMBER皮肤") / wave5 Boss承诺。
+**60秒内离开的原因**：
+1. **CRITICAL — 新手在 wave1 流血至死（D1 流失）**：AFK = 0杀0分，wave1 被打死。训练假人只对**第一个**敌人有效；第2/3个 wave1 敌人正常攻击，冻结的玩家被围殴。Round10 AFK persona 30s只剩55血。
+2. **OVERDRIVE 60秒内对休闲/移动端不可达**：蓄满需 ~25-35s 稳定战斗；休闲/移动端打不到那个量。旗舰主动高潮对最危险人群隐形。
+3. **开局3-5秒分数为0**：要等敌人进入射程并命中才得分。最易流失的时刻屏幕显示"0"。
+4. **移动端治疗环断裂**：0治疗（磁铁需要击杀，移动端杀不动）。
+5. **Game Over 羞辱 wave1 死亡**："YOU REACHED WAVE 1"，无前瞻指引。
+
+### 三支柱改动（仅留存）
+
+**A. 新手引导（修前30秒）**
+- **A1 wave1 全场休战**：把训练假人标记从"仅第一个 wave1 敌人"升级为**场景级 gate**——休战期内**每个** wave1 敌人都 passive。冻结玩家不可能在 wave1 被围殴。玩家首次命中即结束休战；或 12s 全局计时器到期结束。新增 `WAVE1_TRUCE_TIME: 12.0`；每敌人5s自过期改为仅在休战结束后才触发的兜底。
+- **A2 标题 J 标签**：标题界面对打的演示小人出拳时，旁边浮一个发光的"J"。底部控制行在 400px 外易忽略；把键位绑订直接钉在动作上，开局前就用视觉教会 J=出拳。
+
+**B. 奖励节奏（修多巴胺曲线）**
+- **B1 OVERDRIVE 蓄力种子**：开局给 35（满 100）+ FIRST BLOOD 再 +15。旗舰玩家自选高潮从 ~30s 缩到 ~15-20s 可达——休闲/移动端也能在 60s 内放出。
+- **B2 首动作分数**：首次移动 +5、首次跳跃 +5、首次命中 +10（叠加在命中本身得分上）。分数从第1秒就爬升，不再"0"3-5秒。每局一次性、仅 wave1。
+- **B3 保底早期治疗**：wave1 第3次击杀若 HP<满，**必掉**治疗。磁铁（Round10）负责送达。30s 内让治疗环对所有人都转起来，即便 RNG 冷整局。
+
+**C. 进度（修"为何回来"）**
+- **C1 ROOKIE 皮肤（首关通关解锁）**：新皮肤"ROOKIE"，clear wave1 即解锁（bestWave>=2，派生自既有 stat 不新增）。在 `nextUnlock` 排序首位——新账号看到的是"clear wave 1 · 0/1"而非"reach wave 5"。任何活过开局的人都能在 <60s 内拿到第一个化妆品，单局内启动 meta 循环。新增 `waveclear` 解锁类型。
+- **C2 早期死亡的 Game Over 提示**：wave1/2 死亡且非新纪录时，CTA 上方加一行语境提示：wave1→"TIP: hold J to chain punches — the first hit is free"；wave2→"TIP: press K to kick enemies back when surrounded"。最易流失永不再来的人群给一条具体可执行的前瞻动作，让第2局比第1局好。
+
+### 改动文件
+- `config.js`：`RETENTION.WAVE1_TRUCE_TIME`、`FIRST_MOVE_SCORE`/`FIRST_JUMP_SCORE`/`FIRST_HIT_SCORE`、`EARLY_HEAL_KILL`；`BURST.START_METER`、`BURST.FIRST_BLOOD_BONUS`。
+- `GameScene.js`：`wave1Truce`/`wave1TruceT` 状态 + `_endWave1Truce()`；spawn 标记改为 `n===1 && this.wave1Truce`；首次命中结束休战；wave1 计时器到期结束休战；首命中+15大招、+10分；首动作分数（move/jump）；wave1 第3杀保底治疗。
+- `Enemy.js`：每敌人 passive 自过期 gate 在 `!scene.wave1Truce`（休战期不提前结束）。
+- `Player.js`：`burst` 初始化为 `START_METER`（35）。
+- `TitleScene.js`：`demoKey`（出拳时发光的 J 标签）。
+- `GameOverScene.js`：wave<=2 死亡的语境提示行。
+- `Meta.js`：`rookie` 皮肤（waveclear 类型）+ 排序首位；`waveclear` 解锁逻辑（bestWave>=value+1）。
+
+### 验证
+- 官方 CI **5/5**（桌面×3 + 移动横/竖）。
+- 新增 `tests/firstminute.spec.js` **11/11**（A1 三项: 全体passive/首命中结束休战/AFK12s零伤；A2 标题J标签；B1 槽初始35+首杀加成；B2 首移动/首跳分数；B3 第3杀保底治疗；C1 ROOKIE解锁；C2 wave1死亡提示）。注册 `firstminute` project。
+- 调整：`onboarding-assist` test3（grace→scene truce gate）；`retention` Meta test（ember→rookie 首位）；`burst` test1/2/3（隔离 v2 seed + first-blood 加成，专注 +5/+12/+9 delta）。
+- 4-persona 真人对局（`playthrough`）首分钟实测：
+
+| Persona | 指标 | Round10 | 本轮 | Δ |
+|---|---|---|---|---|
+| AFK 30s | 终血 | 55 | **91** | +36（D1 流失修复） |
+| AFK 30s | 挨打次数 | 5 | **1** | -4 |
+| 休闲 60s | 分数 | 4190 | **7870** | +88% |
+| 休闲 60s | 最高连击 | 10 | **35** | +25 |
+| 休闲 60s | 大招蓄满 | 否 | **是** | 旗舰可达 |
+| 硬核 90s | 波数 | 4 | **5(Boss)** | +1 |
+| 硬核 90s | 最高连击 | 30 | **47** | +17 |
+| 移动 45s | 终血 | 53 | **73** | +20 |
+| 移动 45s | 大招蓄满 | 否 | **是** | 旗舰可达 |
+
+- 全部 dev 套件零回归：assist4/retention5/meta2/burst8(含75s真人)/onboard/combo/bridge/magnet/swarm/depth3/laststand4/qa7/variety14(含bossvariety4)/playthrough4/difficulty/sprint3/autofire2/music4/volume/eval/boss3(含75s真人)/evalburst —— **109/109 通过**。
+
+### 诚实保留
+- AFK persona（永不按 J）只能被"延迟死亡"救——休战给 12s 安全窗，过了仍会流血。但 12s 足以读完屏幕、看到"PRESS J"救生圈、试着按一下。目标人群是"会试 J 但需要一点时间"的远更大群体。
+- B3 保底治疗在 casual/mobile 本轮未触发（wave1 击杀不到3即进入 wave2）——它是安全网，主治疗环（磁铁+掉率）仍工作；casual 本轮终血82（健康）。
+- 留存是结构/机制代理指标 + Playwright 遥测，非真人手感。

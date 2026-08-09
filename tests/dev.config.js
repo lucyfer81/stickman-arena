@@ -38,6 +38,7 @@ module.exports = defineConfig({
     project('difficulty',  /difficulty\.spec\.js/,   90000),
     project('eval',        /eval-secondwind\.spec\.js/, 90000),
     project('evalburst',   /eval-burst\.spec\.js/,    120000),
+    project('firstminute', /firstminute\.spec\.js/,   90000),
     project('laststand',   /laststand\.spec\.js/,    90000),
     project('magnet',      /magnet\.spec\.js/,        60000),
     project('meta',        /meta\.spec\.js/,         60000),

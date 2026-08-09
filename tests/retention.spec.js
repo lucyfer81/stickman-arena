@@ -111,17 +111,17 @@ test.describe('Retention — Meta.nextUnlock & tomorrow daily', () => {
     const r = await page.evaluate(() => {
       const M = window.__meta;
       localStorage.removeItem('stickman_arena_stats');
-      const g0 = M.nextUnlock();                 // fresh -> ember
+      const g0 = M.nextUnlock();                 // fresh -> rookie (FIRST-MINUTE v2: <60s unlock)
       localStorage.setItem('stickman_arena_stats', JSON.stringify({ totalKills: 0, gamesPlayed: 0, bestWave: 5, bestCombo: 0, bestScore: 0, totalScore: 0 }));
-      const g1 = M.nextUnlock();                 // ember now unlocked -> toxic
+      const g1 = M.nextUnlock();                 // rookie+ember now unlocked -> toxic
       const tom = M.dailyModifierTomorrow();
       // all unlocked
       localStorage.setItem('stickman_arena_stats', JSON.stringify({ totalKills: 200, gamesPlayed: 9, bestWave: 9, bestCombo: 25, bestScore: 9000, totalScore: 30000 }));
       const gAll = M.nextUnlock();
       return { g0, g1, tomName: tom.name, gAll };
     });
-    expect(r.g0.key).toBe('ember');
-    expect(r.g0.target).toBe(5);
+    expect(r.g0.key).toBe('rookie');
+    expect(r.g0.target).toBe(1);
     expect(r.g1.key).toBe('toxic');
     expect(r.tomName).toBeTruthy();
     expect(r.gAll).toBeNull();
