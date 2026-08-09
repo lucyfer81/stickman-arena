@@ -84,6 +84,24 @@ export class UIScene extends Phaser.Scene {
     this.btnPunch = this._makeBtn(CONFIG.WIDTH - 236, by, 66, 'PUNCH', 0xffd23f);
     this.btnKick = this._makeBtn(CONFIG.WIDTH - 110, by - 30, 74, 'KICK', 0xff6f5c);
 
+    // OVERDRIVE touch button (top-right, isolated). Only visually live + glowing
+    // when the meter is full; the press guard (in the handler) blocks misfires.
+    this._burstReady = false;
+    this.btnBurstG = this.add.graphics().setScrollFactor(0);
+    this.btnBurstT = this.add.text(CONFIG.WIDTH - 64, by - 118, '\u26A1', {
+      fontFamily: 'Arial Black', fontSize: '26px', color: '#0b1a2a',
+    }).setOrigin(0.5);
+    this.btnBurstLabel = this.add.text(CONFIG.WIDTH - 64, by - 94, 'BURST', {
+      fontFamily: 'Arial Black', fontSize: '10px', color: '#0b1a2a',
+    }).setOrigin(0.5);
+    this.btnBurstZone = this.add.zone(CONFIG.WIDTH - 64, by - 108, 96, 96).setInteractive();
+    this.btnBurstZone.on('pointerdown', () => {
+      const c = this.gameScene.controls;
+      if (c) c.burstPressed = true;
+    });
+    this.touchGroup.add([this.btnBurstG, this.btnBurstT, this.btnBurstLabel, this.btnBurstZone]);
+    this._drawBurstBtn(false);
+
     this.input.addPointer(2);
 
     // joystick pointer handling on left-bottom
@@ -179,6 +197,27 @@ export class UIScene extends Phaser.Scene {
     zone.on('pointerupoutside', () => { draw(false); if (label === 'JUMP') c2.jumpHeldTouch = false; if (repeatable) this.touchHeld[label] = false; });
     this.touchGroup.add([c, t, zone]);
     return { c, t, zone };
+  }
+
+  // OVERDRIVE touch button redraw — only glows when the meter is full/ready so
+  // the player reads it as "press me NOW"; dim + small otherwise.
+  _drawBurstBtn(ready) {
+    const g = this.btnBurstG;
+    const bx = CONFIG.WIDTH - 64, by = CONFIG.HEIGHT - 84 - 108;
+    const r = ready ? 40 : 30;
+    g.clear();
+    g.fillStyle(0xffd23f, ready ? 0.9 : 0.18);
+    g.fillCircle(bx, by, r);
+    g.lineStyle(3, 0xffe26b, ready ? 1 : 0.4);
+    g.strokeCircle(bx, by, r);
+    if (ready) {
+      g.lineStyle(2, 0xffffff, 0.6);
+      g.strokeCircle(bx, by, r + 6);
+    }
+    this.btnBurstT.setPosition(bx, by - 6).setAlpha(ready ? 1 : 0.4);
+    this.btnBurstLabel.setPosition(bx, by + 18).setAlpha(ready ? 1 : 0.4);
+    this.btnBurstT.setColor(ready ? '#0b1a2a' : '#7a5e1a');
+    this.btnBurstLabel.setColor(ready ? '#0b1a2a' : '#7a5e1a');
   }
 
   _buildMute() {
@@ -314,6 +353,11 @@ export class UIScene extends Phaser.Scene {
       if (this.touchHeld.PUNCH) c.punchPressed = true;
       if (this.touchHeld.KICK) c.kickPressed = true;
     }
+    // OVERDRIVE touch button: refresh its glow from the live HUD ready flag.
+    if (this.btnBurstG && this._drawBurstBtn) {
+      const ready = !!(hud && hud.burstReady);
+      if (ready !== this._burstReady) { this._burstReady = ready; this._drawBurstBtn(ready); }
+    }
     // frame-rate-independent tween rates (were ±0.2/0.1 per frame → 2.4x faster
     // on 144Hz). Normalize to per-second using the actual frame delta.
     const dt = Math.min(deltaMs || 16, 50) / 1000;
@@ -338,11 +382,40 @@ export class UIScene extends Phaser.Scene {
       }).setDepth(101);
     }
 
-    // RAGE bar — a thin orange bar under the HP bar that only appears while the
+    // OVERDRIVE burst meter — a gold bar under the HP bar. Always visible: it's a
+    // core player-earned mechanic, so the player should always see it building.
+    // Pulses + shows a key hint when full and ready to unleash.
+    {
+      const bb_w = bw, bb_h = 9, bb_y = by + bh + 4;
+      g.fillStyle(0x000000, 0.5);
+      g.fillRoundedRect(bx - 2, bb_y - 2, bb_w + 4, bb_h + 4, 4);
+      g.fillStyle(0x2a2008, 0.95);
+      g.fillRoundedRect(bx, bb_y, bb_w, bb_h, 4);
+      const bfrac = clamp((hud.burst || 0) / (hud.burstMax || 1), 0, 1);
+      const ready = (hud.burst || 0) >= (hud.burstMax || 1) && !hud.bursting;
+      const pulse = ready ? (0.55 + 0.45 * Math.sin(this.time.now * 0.016)) : 1;
+      g.fillStyle(ready ? 0xffe26b : 0xffd23f, pulse);
+      g.fillRoundedRect(bx, bb_y, Math.max(0, bb_w * bfrac), bb_h, 4);
+      if (ready) {
+        g.lineStyle(2, 0xffffff, 0.75 * pulse);
+        g.strokeRoundedRect(bx, bb_y, bb_w, bb_h, 4);
+      }
+      if (!this._burstLabel) {
+        this._burstLabel = this.add.text(bx + bb_w / 2, bb_y + bb_h / 2, 'OVERDRIVE', {
+          fontFamily: 'Arial Black', fontSize: '8px', color: '#0b1a2a',
+        }).setOrigin(0.5).setDepth(101);
+      }
+      // ready hint: pulse the prompt at the bar
+      this._burstLabel.setText(ready ? (this._touchVisible ? 'TAP \u26A1 OVERDRIVE' : 'OVERDRIVE \u2014 PRESS L') : 'OVERDRIVE');
+      this._burstLabel.setColor(ready ? '#0b1a2a' : '#7a5e1a');
+      this._burstLabel.setAlpha(ready ? 0.95 * pulse : 0.5);
+    }
+
+    // RAGE bar — a thin orange bar under the OVERDRIVE bar that only appears while the
     // rage buff is active, so the player sees both the payoff (x2 score / harder
     // hits) and the remaining duration.
     if (hud.rage && hud.rage > 0) {
-      const rb_w = bw, rb_h = 7, rb_y = by + bh + 4;
+      const rb_w = bw, rb_h = 7, rb_y = by + bh + 4 + 9 + 3;
       g.fillStyle(0x000000, 0.5);
       g.fillRoundedRect(bx - 2, rb_y - 2, rb_w + 4, rb_h + 4, 4);
       g.fillStyle(0x2a1208, 0.95);

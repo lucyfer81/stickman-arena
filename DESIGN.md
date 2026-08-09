@@ -407,4 +407,51 @@ score nearly doubled and the combo ceiling is now reachable (x30). The casual is
 thriving one wave from the boss; the first-timer has a safe window; mobile chains
 attacks. All 8 backlog items resolved or verified-by-design.
 
+## Round 11 — fun-first pass: OVERDRIVE (player-built active super)
+
+After Round 10 the game was stable and content-rich, so the next pass was pure
+**fun**. A designer review found the #1 fun-killer was *structural*: every climax
+was **reactive** (boss appears, you hit 0 HP → Second Wind). There was **zero
+player-initiated** power. The moment-to-moment J/K loop, while juiced, gave the
+player no "NOW I unleash" beat — the one thing every great brawler has (SoR star
+moves, musou, devil trigger, Hades calls). The Rage pickup is a passive RNG buff,
+not a chosen button. This was the single highest fun leverage point.
+
+### What shipped — OVERDRIVE burst meter
+- A meter (cap 100) the player **earns** by fighting: +5/hit, +12/kill, +9/hit
+  taken (~1 charge per 25–35s of combat).
+- When full, **press L** (or a touch button) to unleash a radial **OVERDRIVE**
+  wave: 45 dmg + big knockback to all enemies in radius (kills most weak ones),
+  a flat 50 to bosses (chunk, never a one-shot), and it **vaporizes enemy
+  projectiles** + **blows out ground fire** in radius — a power-fantasy screen
+  clear. Usable even from the `hurt` state (panic-button / combo-breaker).
+- Feedback peak just under boss-kill: BOSS_KILL-tier zoom + dual ring + dual
+  gold/white particle storm + 0.4s slow-mo + heavy shake + "OVERDRIVE!" banner.
+- HUD: a gold meter bar under HP that pulses + prompts when ready; a mobile
+  BURST button that only glows interactive when full.
+
+### Verification
+- New `tests/burst.spec.js` 7/7 — meter build (hit/kill/hurt), full-only gate,
+  crowd-clear AoE, boss flat-chunk (50±2, not the grunt 45), projectile+fire clear.
+- Official CI 5/5 green; boss 3/3, depth 3/3, laststand 4/4, **variety 14/14**
+  (confirms the AoE clear doesn't disturb the projectile/hazard/event layers).
+- New `tests/eval-burst.spec.js` (75s real play, persona pops Overdrive on
+  cooldown): **3 Overdrives fired**, reached **wave 5 (the boss)** in 75s (vs
+  Round-10 hardcore reaching wave 4 in 90s), 0 runtime errors.
+
+### Fun-axis deltas
+| Axis | Before | After |
+|---|---|---|
+| Player-initiated climaxes | none (all reactive) | ~1 per 25s, player-CHOSEN |
+| Flagship content reachable | hardcore wave 4 @ 90s | wave 5 boss @ 75s |
+| Decisions / run | none (kick-spam optimal) | "when to pop" = several/run |
+| Story potential | "reached wave N" | "6 on me, I popped Overdrive, cleared them" |
+| Escape / comeback | Second Wind only (at 0 HP) | Overdrive panic-button (any full meter) |
+
+Honest caveats: fun is measured via structural/mechanical proxies + real-play
+telemetry, not human feel. The flat 50 boss damage is deliberate — Overdrive
+accelerates but never **skips** the climactic duel. Future: wire Overdrive stats
+into meta unlocks ("N enemies caught in one burst" badge) or a unique execution
+animation on the release.
+
 

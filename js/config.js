@@ -115,6 +115,30 @@ export const CONFIG = {
     SPRINT_IN: { TIME: 0.6, BOOST: 2.0 },  // seconds of entrance sprint / speed multiplier
   },
 
+  // ---- OVERDRIVE — player-built active super move ----
+  // The missing player-INITIATED climax. Every great brawler gives the player a
+  // self-built, self-chosen power spike (SoR star moves / musou / devil trigger).
+  // Here the player builds a meter by fighting and UNLEASHES a radial burst that
+  // clears crowds, vaporizes projectiles and blows out fire — a player-made peak
+  // that fills the dead stretches between reactive climaxes (boss / Second Wind).
+  // Distinct from Rage (a passive RNG buff): Overdrive is an active button fed by
+  // earned meter, so it's a decision AND a story on every run.
+  BURST: {
+    METER_MAX: 100,
+    ON_HIT: 5,        // meter gained per landed player attack
+    ON_KILL: 12,      // meter gained per kill
+    ON_HURT: 9,       // meter gained when the player takes a hit (comeback feel)
+    WINDUP: 0.22,     // charge pose before release (invuln starts here)
+    RELEASE_TIME: 0.30, // seconds the radial wave takes to reach full radius
+    RADIUS: 520,      // max burst radius (px from player)
+    DAMAGE: 45,       // damage to normal enemies in radius
+    BOSS_DAMAGE: 50,  // flat damage to bosses (chunk, never skip the fight)
+    KNOCKBACK: 760,
+    INVULN: 0.75,     // i-frames covering windup + release tail
+    SCORE_PER_HIT: 60,// score bonus per enemy struck (rewards timing for a crowd)
+    KEY: 'L',
+  },
+
   // ---- SECOND WIND ("The Broken") — surprising comeback mechanic ----
   // Once per run, lethal damage (0 HP) does NOT end the game. The stickman
   // shatters (right arm detaches + screen desaturates) and enters a short,

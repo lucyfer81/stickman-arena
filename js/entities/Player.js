@@ -28,6 +28,10 @@ export class Player extends Stickman {
     this.brokenT = 0;
     this.brokenMax = 1;
     this.secondWindUsed = false;
+    // OVERDRIVE: a player-built super meter. The scene adds to it on hits/kills/
+    // taking damage, and consumes it when the player unleashes (GameScene._burst).
+    this.burst = 0;
+    this.burstMax = CONFIG.BURST.METER_MAX;
   }
 
   setPalette(p) { this.palette = p; }
