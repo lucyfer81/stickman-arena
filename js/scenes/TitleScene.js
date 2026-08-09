@@ -137,21 +137,47 @@ export class TitleScene extends Phaser.Scene {
       }).setOrigin(0.5);
     }
 
+    // OPTIONS button (top-right gear) — opens the rebindable controls + shake
+    // toggle overlay. The #1 + #2 post-launch complaints were "no key remapping"
+    // and "no screen-shake toggle" (Round 3 review audit) — both live here.
+    this.optionsLabel = this.add.text(CONFIG.WIDTH - 22, 26, '\u2699  OPTIONS', {
+      fontFamily: 'Arial Black', fontSize: '18px', color: '#cfe3f2',
+      stroke: '#0b1a2a', strokeThickness: 4,
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    this.optionsRect = new Phaser.Geom.Rectangle(CONFIG.WIDTH - 22 - 150, 26 - 4, 150, 28);
+    this.optionsLabel.on('pointerover', () => this.optionsLabel.setColor('#35e1ff'));
+    this.optionsLabel.on('pointerout', () => this.optionsLabel.setColor('#cfe3f2'));
+    this.optionsLabel.on('pointerdown', (pointer, localX, localY, event) => {
+      event && event.stopPropagation();
+      this._openOptions();
+    });
+
     // input — tap anywhere to start, EXCEPT on the difficulty selector
     this.input.keyboard.on('keydown-SPACE', () => this.start());
     this.input.keyboard.on('keydown-ENTER', () => this.start());
     this.input.keyboard.on('keydown-ONE', () => this._setDiff('easy'));
     this.input.keyboard.on('keydown-TWO', () => this._setDiff('normal'));
     this.input.keyboard.on('keydown-THREE', () => this._setDiff('hard'));
+    this.input.keyboard.on('keydown-O', () => this._openOptions());
     this.input.on('pointerdown', (pointer) => {
       if (this.diffRect && this.diffRect.contains(pointer.x, pointer.y)) return;
       if (this.skinRect && this.skinRect.contains(pointer.x, pointer.y)) return;
       if (this.dailyRect && this.dailyRect.contains(pointer.x, pointer.y)) return;
+      if (this.optionsRect && this.optionsRect.contains(pointer.x, pointer.y)) return;
       this.start();
     });
 
     this.cameras.main.fadeIn(300);
-    if (typeof window !== 'undefined') window.__stickman = { state: 'title', difficulty: this.difficulty };
+    if (typeof window !== 'undefined') {
+      window.__stickman = { state: 'title', difficulty: this.difficulty };
+      window.__options = { open: false };
+    }
+  }
+
+  _openOptions() {
+    if (this.registry.get('optionsOpen')) return;
+    this.audio && this.audio.ui();
+    this.scene.launch('Options', { from: 'title' });
   }
 
   _refreshDiff() {
@@ -236,6 +262,7 @@ export class TitleScene extends Phaser.Scene {
 
   start() {
     if (this.starting) return;
+    if (this.registry.get('optionsOpen')) return; // don't start under the options overlay
     this.starting = true;
     this.audio && this.audio.resume();
     this.audio && this.audio.start();

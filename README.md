@@ -12,6 +12,7 @@ Fight endless waves of stickman enemies, build combos, grab health drops, and ch
 - **Kick:** `K` (slow, heavy, big knockback)
 - **Overdrive:** `L` (when the gold meter under your HP is full — unleash a radial burst that clears crowds, vaporizes projectiles, and chunks bosses)
 - **Pause:** `Esc`
+- **Options / rebind keys:** gear `OPTIONS` button on the title (or in the pause menu) — rebind any action and toggle screen-shake (full/reduced/off). Arrow keys + `Space` always remain as movement/jump alternates.
 - **Mobile:** on-screen **virtual joystick** (bottom-left) + **Jump / Punch / Kick / Burst** buttons (bottom-right). Landscape recommended.
 
 Attacks auto-face the nearest enemy. Chain hits within the combo window to multiply your score. Fight to fill the Overdrive meter, then spend it on a clutch screen-clear.

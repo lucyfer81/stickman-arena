@@ -900,3 +900,57 @@ kick 0.46s 连接、0.62s 空挥）与伤害（11/16）一字未改，boss 大�
 首次触发即是意义，若遥测显示"从不出现"可上调 CHANCE；③ forceMercy 钩子绕过 mercyDone 用于
 确定性测试，自然路径仍受每波 gate 约束。
 
+## Round C — 上线后 Steam 评价驱动迭代（Round 3 评价批次）
+
+延续 Round A（音乐）/ Round B（第二 Boss）的评价驱动循环。基于 Round 15 后的现状
+（MERCY / OVERDRIVE / 12 敌人 / 12 事件 / 音乐 / 双 Boss / feel pass 2），重新写了一批
+20 正面 + 20 负面评价（`docs/post-launch-reviews.md` Round 3）。内容抱怨已基本消失，分布
+**迁移到从未修复的"管道/无障碍"层**：
+
+| # | 抱怨簇 | 提及 | 自哪轮反复出现 |
+|---|---|---|---|
+| **1** | **无按键重绑 / 无选项菜单** | **8/20** | Round 1 起每轮（#10/#11、N3）从未修 |
+| 2 | 屏震/动晕 toggle（无障碍） | 4 | Round 1 起（#13、N5）从未修 |
+| 3 | 移动端按键（手掌/震动） | 3 | Round 1 起 |
+
+#1+#2 是**同一个缺失功能**（没有设置界面），#1 自发售起每轮都被点"PC table stakes /
+in 2026 is wild"却从未动过，影响 100% 键盘玩家——是最高杠杆点。
+
+### Round C 修复：可重绑控制 + 选项菜单 + 屏震 toggle
+- **`js/systems/Options.js`**（新，镜像 Meta.js 的 localStorage + 内存缓存避免每帧
+  JSON.parse）：7 个可绑动作（left/right/jump/punch/kick/burst/spare），默认逐字复刻原
+  布局 `A D W J K L H`（零回归）；重复绑定走 **swap**（不孤立任何键）；`shakeMode`
+  full/reduced/off。
+- **`js/scenes/OptionsScene.js`**（新）：标题（齿轮钮 + O 键）与暂停浮层（OPTIONS 钮）均可
+  调出的模态层。点行→捕获下一按键（DOM `event.code`→Phaser 名）；SHAKE 循环行；
+  RESET；BACK/ESC 关闭（捕获中 ESC 取消捕获）。全屏交互背景吸收误点，绝不串到开始/取消暂停。
+- **`GameScene.js`**：`_setupKeyboard` 改读 `Options.bindings()`；**方向键 + SPACE 保留为
+  固定备用键**（不可重绑，默认与无障碍兼保）；`_shake` 振幅 ×`Options.shakeScale()`
+  （1 / 0.4 / 0，off 直短路）；`_togglePause` 在选项打开时 no-op。
+- **`TitleScene.js`**：OPTIONS 齿轮钮 + O 键；`start()` 在 optionsOpen 时跳过。
+- **`UIScene.js`**：暂停浮层加 OPTIONS 钮（局中重绑）。
+- **`main.js`**：注册 OptionsScene；`window.__options_module` 供测试。
+
+### 设计取舍（多解取更享受的）
+- 默认逐字不变（CI 5/5 不动）。
+- 固定备用键而非"第二可绑槽"：UI 仅 7 行，且玩家永不会把自己锁成不能动。
+- 重复 swap 而非拒绝：无错误态、不孤立键，恒保唯一性（测试断言）。
+- 屏震 toggle 同菜单顺带修：#2 是同一缺失功能；reduced 40% 保留 juice 又减负。
+
+### 验证（实跑，零回归）
+- 新增 `tests/options.spec.js` **10/10**（注册 `options` project）：默认逐字复刻；O 键打开且
+  不开始游戏；真实捕获 UI 重绑（点行→按键→持久化）；ESC 关闭；**重绑键走真实战斗管线**
+  （U 出拳 11 伤、被释放的 J 无效）；固定备用键在重绑后仍工作（SPACE 跳、LEFT 移）；
+  屏震缩放（5→5/2.0/0）；重复 swap；reset 还原；暂停界面可达且关闭不自动恢复。
+- 官方 CI **5/5 绿**（桌面×3 + 移动横/竖）。
+- 改动键盘后关键 dev 套件全绿：depth 3/3、burst 8/8（含 75s 真人）、laststand 4/4、
+  music 4/4、firstminute 11/11。
+
+### 诚实保留
+- 绑定按 Phaser 名存储（由物理 `event.code` 解析），跟物理键位（利好 ergo/AZERTY）而非
+  产出字符；鼠标侧键/手柄不在范围。
+- 新测试顺带暴露（非引入）一个 harness 现象：Playwright `keyboard.press` 在 headless 会
+  连发 keydown，游戏边沿触发攻击按"按住连击"语义响应（真机按住 J 本就设计为连击）。测
+  跳跃的用例先清场避开战斗锁；真机轻敲只发一次 keydown 不受影响。
+
+

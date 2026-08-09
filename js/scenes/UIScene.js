@@ -292,7 +292,21 @@ export class UIScene extends Phaser.Scene {
     const h = this.add.text(0, 50, 'tap \u25B6 or press ESC to resume', {
       fontFamily: 'Arial', fontSize: '22px', color: '#9bb4c8',
     }).setOrigin(0.5);
-    this.pauseOverlay.add([bg, t, h]);
+    // OPTIONS entry from a paused run — rebindable controls + shake toggle
+    // (the #1/#2 post-launch complaints). Clicking opens the overlay on top;
+    // the run stays paused underneath so closing options returns to the pause menu.
+    const opts = this.add.text(0, 92, '\u2699  OPTIONS', {
+      fontFamily: 'Arial Black', fontSize: '22px', color: '#35e1ff',
+      stroke: '#0b1a2a', strokeThickness: 4,
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    opts.on('pointerover', () => opts.setColor('#ffd23f'));
+    opts.on('pointerout', () => opts.setColor('#35e1ff'));
+    opts.on('pointerdown', (pointer, localX, localY, event) => {
+      event && event.stopPropagation();
+      if (this.registry.get('optionsOpen')) return;
+      this.scene.launch('Options', { from: 'game' });
+    });
+    this.pauseOverlay.add([bg, t, h, opts]);
   }
 
   _buildPauseButton() {
