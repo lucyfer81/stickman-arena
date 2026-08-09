@@ -256,9 +256,57 @@ export const CONFIG = {
       PROJECTILE_RADIUS: 12,   // collision radius
       PROJECTILE_LIFE: 3.0,
     },
+    // charger — telegraphed horizontal charge that punishes turtling. A mini
+    // version of the boss commitment pattern: glow windup -> locked dash with a
+    // tall hitbox -> recover. The counter is to jump/step aside (it commits
+    // straight), distinct from the leaper's anti-air dive.
+    CHARGER: {
+      CHARGE_CD: [3.2, 4.6],     // seconds between charges
+      CHARGE_WINDUP: 0.55,       // telegraph before the dash locks in
+      CHARGE_SPEED: 620,         // committed horizontal dash velocity
+      CHARGE_TIME: 0.5,          // how long the dash lasts
+      CHARGE_RECOVER: 0.6,       // vulnerable pause after the dash
+      CHARGE_RANGE: 520,         // max distance to start a charge
+    },
+    // medic — support: periodically channels a heal to the lowest-HP nearby
+    // ally. Creates a target-priority decision (kill it first or the pack
+    // sustains). Weak melee only as self-defense; reuses the throw windup.
+    MEDIC: {
+      HEAL_CD: [3.8, 5.2],       // seconds between heal channels
+      HEAL_WINDUP: 0.7,          // charge-up before the pulse lands
+      HEAL_RECOVER: 0.8,         // vulnerable pause after healing
+      HEAL_RANGE: 300,           // must be within this of a wounded ally
+      HEAL_AMOUNT: 18,           // hp restored to the lowest ally
+      HEAL_THRESHOLD: 0.7,       // allies below this HP fraction are candidates
+      KITE_RANGE: 280,           // otherwise keeps this distance from the player
+    },
+    // splitter — on death splits into two spawnlings. Rewards overkill (so the
+    // adds don't multiply) and creates emergent crowd pressure. Standard melee.
+    SPLITTER: {
+      SPAWN_COUNT: 2,            // mini-grunts produced on death
+    },
+    // spawnling — the weak, fast mini-grunt produced by a splitter death.
+    SPAWNLING: {
+      // purely a tuned grunt; no behavior of its own.
+    },
     // hazard layer (ground fire) — shared by bomber blasts + meteor event.
     HAZARD: {
       TICK: 0.5,               // damage tick interval
+    },
+    // environmental variety — two new ground zones reusing the hazard array:
+    // an ice patch (kinesthetic slip) and a heal shrine (positive risk/reward
+    // objective). Both are pure `kind` flags on the same update/draw loop.
+    ENV: {
+      ICE: {
+        LIFE: 6.0,             // an ice patch lingers longer than fire
+        FRICTION_SCALE: 0.06,  // ground friction is nearly zero on ice (slide)
+        ACCEL_SCALE: 0.35,     // reduced air/ground steer so inputs feel floaty
+      },
+      SHRINE: {
+        LIFE: 7.0,             // a heal shrine lingers; you fight to hold it
+        HEAL_PER_TICK: 6,      // health restored per HAZARD.TICK while standing in it
+        HEAL_CAP: 70,          // total healing a single shrine can grant (anti-farm)
+      },
     },
     // meteor storm event — periodic falling strikes during an event wave.
     METEOR: {

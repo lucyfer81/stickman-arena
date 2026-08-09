@@ -59,6 +59,30 @@ export const EVENTS = {
     minWave: 3,
     apply(s) { s._startRage(CONFIG.CONTENT.PICKUP.RAGE_TIME * 1.6); },
   },
+  frenzy: {
+    name: 'FRENZY', color: '#ff3b30',
+    desc: 'glass cannon — fast & fierce, but brittle!',
+    minWave: 4,
+    apply(s) { s.eventFrenzy = true; },
+  },
+  ambush: {
+    name: 'AMBUSH', color: '#ff5cb0',
+    desc: 'surrounded! enemies hit from both walls',
+    minWave: 4,
+    apply(s) { s.eventAmbush = true; s.eventExtraSpawns = 1; },
+  },
+  plague: {
+    name: 'PLAGUE', color: '#9aff6b',
+    desc: 'medics sustain the pack — hunt the healers',
+    minWave: 5,
+    apply(s) { s.eventVariantPool = ['medic', 'bomber', 'medic', 'charger']; },
+  },
+  blessed: {
+    name: 'BLESSED GROUND', color: '#35e1ff',
+    desc: 'heal shrines ripple up — claim them!',
+    minWave: 3,
+    apply(s) { s.eventShrines = true; if (s._dropShrines) s._dropShrines(); },
+  },
 };
 
 const ORDER = Object.keys(EVENTS);
