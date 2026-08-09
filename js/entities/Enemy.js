@@ -51,6 +51,35 @@ const VARIANTS = {
     palette: { limb: 0xff5cb0, joint: 0xff9ecf, head: 0xffd0e6, accent: 0xd62f8a, fist: 0xffe26b },
     health: 26, speed: 140, damage: 10, scale: 0.98, score: 280, attackReach: 80,
   },
+  charger: {
+    // commitment dash: a telegraphed horizontal charge that locks in and races
+    // across the floor. Punishes turtling / standing still — the counter is to
+    // jump or step aside (it can't steer mid-charge). Mini version of the boss
+    // armor pattern: once committed, only a kill or dodge stops it.
+    palette: { limb: 0xc0392b, joint: 0xe8a59c, head: 0xf5cdc6, accent: 0x7d1d12, fist: 0xffd23f },
+    health: 44, speed: 130, damage: 14, scale: 1.1, score: 260, attackReach: 70,
+  },
+  medic: {
+    // support: channels a heal to the lowest-HP nearby ally, sustaining the
+    // pack. Creates a target-priority decision — ignore it and enemies won't
+    // die; rush it and the rest collapse on you. Weak melee as self-defense.
+    palette: { limb: 0xeaf4ff, joint: 0xbfe3ff, head: 0xffffff, accent: 0x35e1ff, fist: 0x6bff9e },
+    health: 30, speed: 135, damage: 6, scale: 1.0, score: 320, attackReach: 70,
+  },
+  splitter: {
+    // tanky melee that fissures on death into two spawnlings. Rewards overkill
+    // (a clean kill limits the adds) and seeds emergent crowd pressure. Reads
+    // as a rocky bruiser so the player anticipates the split.
+    palette: { limb: 0xb58860, joint: 0xd9b48a, head: 0xe8cda8, accent: 0x7a5a36, fist: 0xffd23f },
+    health: 40, speed: 120, damage: 10, scale: 1.15, score: 200, attackReach: 78,
+  },
+  spawnling: {
+    // the weak, fast mini-grunt produced by a splitter death. Small, fragile,
+    // and aggressive — a splitter kill trades one threat for two smaller ones
+    // unless overkilled. Only spawned by splitter._die(), never from waves.
+    palette: { limb: 0xd9b48a, joint: 0xe8cda8, head: 0xf5e2c6, accent: 0x7a5a36, fist: 0xffe26b },
+    health: 12, speed: 210, damage: 6, scale: 0.7, score: 80, attackReach: 64,
+  },
   boss: {
     // elite climactic enemy for boss waves (every 5th wave). Big, tough, and
     // performs a telegraphed ground-slam whose shockwaves must be jumped.
@@ -119,6 +148,12 @@ export class Enemy extends Stickman {
     // ranged throw state for rangers — cooldown + windup timer
     this.throwCd = rand(1.0, 2.0);
     this.throw = null;     // { phase: 'windup'|'recover', t, windup }
+    // charger dash state — a committed horizontal charge (mini boss-pattern).
+    this.charge = null;    // { phase: 'windup'|'dash'|'recover', t, dir }
+    this.chargeCd = this.variant === 'charger' ? rand(1.6, 3.0) : 0;
+    // medic support state — channels a heal pulse to the lowest-HP nearby ally.
+    this.heal = null;      // { phase: 'windup'|'recover', t, target }
+    this.healCd = this.variant === 'medic' ? rand(2.0, 3.5) : 0;
   }
 
   bodyBox() {
@@ -182,6 +217,12 @@ export class Enemy extends Stickman {
     if (this.isBoss && this.cast && this.cast.phase !== 'windup') {
       return true;
     }
+    // CHARGER commitment: once the dash locks in, light hits can't shove it off
+    // its lane — dodge it, or kick (heavy) to interrupt. Mirrors the boss-armor
+    // model so punch-spam can't stuff a committed charge, but a skill kick can.
+    if (this.variant === 'charger' && this.charge && this.charge.phase === 'dash') {
+      return true;
+    }
     if (phase === 'windup' || phase === 'active') {
       // HYPER-ARMOR: a committed, telegraphed swing plants the feet — accumulated
       // light hits cannot shove it out of its own strike. Kick or dodge instead.
@@ -214,6 +255,10 @@ export class Enemy extends Stickman {
     // chain-reaction play). _detonate is idempotent, so a fuse-completion death
     // won't double-fire.
     if (this.variant === 'bomber') this._detonate();
+    // SPLITTER: fissures into spawnlings on death. The scene owns the enemy
+    // array + scaling, so route through a hook (mirrors _bossEnrage). Idempotent
+    // via the dead flag so a multi-hit death can't double-split.
+    if (this.variant === 'splitter' && this.scene._onSplitterDeath) this.scene._onSplitterDeath(this);
   }
 
   // ---- bomber detonation ----
@@ -272,8 +317,118 @@ export class Enemy extends Stickman {
     }
   }
 
+  // ---- charger commitment dash ----
+  _startCharge(player) {
+    const C = CONFIG.CONTENT.CHARGER;
+    this.charge = {
+      phase: 'windup', t: 0, windup: C.CHARGE_WINDUP,
+      dashTime: C.CHARGE_TIME, recover: C.CHARGE_RECOVER,
+      dir: sign(player.x - this.x) || this.facing,
+    };
+    this.state = 'punch'; // charging pose during windup
+  }
+
+  _progressCharge(dt, player) {
+    const a = this.charge;
+    const C = CONFIG.CONTENT.CHARGER;
+    a.t += dt;
+    if (a.phase === 'windup') {
+      // TELEGRAPH: plant + face the player + glow ramps so the dash reads. A
+      // brief squat tells the player "it's about to lunge".
+      this.facing = a.dir;
+      this.glow = clamp01(a.t / a.windup);
+      this.vx *= clamp01(1 - 10 * dt);
+      if (a.t >= a.windup) {
+        a.phase = 'dash'; a.t = 0; this.glow = 1;
+        this.vx = a.dir * C.CHARGE_SPEED;
+        this.state = 'run';
+      }
+      return;
+    }
+    if (a.phase === 'dash') {
+      // committed dash — locks velocity straight; can't steer. Hyper-armor
+      // (handled in takeHit via this.charge) means it can only be stopped by a
+      // kill or by running into a wall.
+      this.vx = a.dir * C.CHARGE_SPEED;
+      this.glow = 0.85;
+      if (a.t >= a.dashTime || this.x <= CONFIG.WALL_LEFT + 4 || this.x >= CONFIG.WALL_RIGHT - 4) {
+        a.phase = 'recover'; a.t = 0; this.glow = 0.25;
+        this.state = 'idle';
+      }
+      return;
+    }
+    // recover: a vulnerable pause — the punish window for dodging the dash
+    this.vx *= clamp01(1 - 8 * dt);
+    if (a.t >= a.recover) {
+      this.charge = null;
+      this.chargeCd = rand(C.CHARGE_CD[0], C.CHARGE_CD[1]);
+      this.glow = 0;
+      this.state = this.onGround ? 'idle' : 'jump';
+    }
+  }
+
+  // ---- medic support heal ----
+  // Find the lowest-HP wounded ally in range (excluding self/dead/boss). Used
+  // to decide whether to start a heal channel this tick.
+  _healTarget(M) {
+    let best = null, bestFrac = M.HEAL_THRESHOLD;
+    for (const o of this.scene.enemies) {
+      if (o === this || o.dead || o.isBoss) continue;
+      if (Math.abs(o.x - this.x) > M.HEAL_RANGE) continue;
+      const frac = o.health / o.maxHealth;
+      if (frac < bestFrac) { bestFrac = frac; best = o; }
+    }
+    return best;
+  }
+
+  _startHeal(target) {
+    const M = CONFIG.CONTENT.MEDIC;
+    this.heal = { phase: 'windup', t: 0, windup: M.HEAL_WINDUP, recover: M.HEAL_RECOVER, target };
+    this.state = 'punch'; // both-arms-forward casting pose during windup
+  }
+
+  _progressHeal(dt, player) {
+    const a = this.heal;
+    const M = CONFIG.CONTENT.MEDIC;
+    a.t += dt;
+    // face the player for self-defense awareness, but the beam goes to the ally
+    this.facing = sign(player.x - this.x) || this.facing;
+    if (a.phase === 'windup') {
+      this.glow = clamp01(a.t / a.windup) * 0.8;
+      this.vx *= clamp01(1 - 8 * dt); // plant feet while channeling
+      if (a.t >= a.windup) {
+        // pulse: heal the lowest-HP ally (re-resolve in case the prior target
+        // died mid-channel) + a green beam visual via a scene hook.
+        const tgt = (a.target && !a.target.dead) ? a.target : this._healTarget(M);
+        if (tgt && this.scene._healBeam) this.scene._healBeam(this.x, this.y - 92, tgt);
+        if (tgt && !tgt.dead) {
+          tgt.health = Math.min(tgt.maxHealth, tgt.health + M.HEAL_AMOUNT);
+          tgt.flashTime = 0.16; // green-tinted flash reads as "healed"
+        }
+        a.phase = 'recover'; a.t = 0; this.glow = 0.2;
+        this.state = 'idle';
+      }
+      return;
+    }
+    // recover: vulnerable pause — the punish for rushing a medic mid-cast
+    this.vx *= clamp01(1 - 10 * dt);
+    if (a.t >= a.recover) {
+      this.heal = null;
+      this.healCd = rand(M.HEAL_CD[0], M.HEAL_CD[1]);
+      this.glow = 0;
+      this.state = this.onGround ? 'idle' : 'jump';
+    }
+  }
+
   getHitbox(player) {
-    if (!this.attack || this.dead) return null;
+    if (this.dead) return null;
+    // CHARGER dash: a tall, body-following hitbox during the dash phase so the
+    // charge connects with anyone in its lane (mirrors the leaper dive shape).
+    if (this.charge && this.charge.phase === 'dash') {
+      const w = 78, h = 150;
+      return { x: this.x - w / 2, y: this.y - NECK * this.scale - h * 0.5, w, h, dmg: Math.round(this.v.damage * this.dmgMul), kb: CONFIG.ENEMY.KNOCKBACK, from: this.x };
+    }
+    if (!this.attack) return null;
     const a = this.attack;
     if (a.phase !== 'active') return null;
     const reach = this.v.attackReach;
@@ -335,6 +490,25 @@ export class Enemy extends Stickman {
     // RANGER throw windup: a committed lob. Takes priority once started.
     if (this.throw) {
       this._progressThrow(dt, player);
+      this._physics(dt);
+      this._render();
+      return;
+    }
+
+    // CHARGER dash: a committed horizontal charge. Once committed (past windup)
+    // it has hyper-armor and takes over the body until recover — like a mini
+    // boss-slam. Progressed before the melee AI so a started charge always runs.
+    if (this.charge) {
+      this._progressCharge(dt, player);
+      this._physics(dt);
+      this._render();
+      return;
+    }
+
+    // MEDIC heal channel: a committed support pulse to the lowest-HP ally. Takes
+    // priority once started (the medic plants to cast, like the ranger throw).
+    if (this.heal) {
+      this._progressHeal(dt, player);
       this._physics(dt);
       this._render();
       return;
@@ -452,6 +626,61 @@ export class Enemy extends Stickman {
       }
       if (this.onGround && !this.throw && this.throwCd <= 0 && dist <= R.THROW_RANGE && dist >= 50) {
         this._startThrow();
+      }
+      this._physics(dt);
+      this._render();
+      return;
+    }
+
+    // CHARGER: a commitment-dash specialist. At mid-range it starts a
+    // telegraphed charge (mini boss-pattern); otherwise it approaches with the
+    // standard melee flank logic below. The dash punishes players who stand
+    // still — the counter is to jump or step aside, since it can't steer.
+    if (this.variant === 'charger') {
+      const C = CONFIG.CONTENT.CHARGER;
+      this.chargeCd -= dt;
+      if (this.onGround && this.chargeCd <= 0 && dist > reach * 1.3 && dist < C.CHARGE_RANGE) {
+        this._startCharge(player);
+        this._physics(dt);
+        this._render();
+        return;
+      }
+      // fall through to the general melee approach below when not charging
+    }
+
+    // MEDIC: support. Kites at KITE_RANGE and channels a heal to the lowest-HP
+    // wounded ally whenever one is in range + off cooldown. Weak melee only as
+    // self-defense when crowded. Creates a target-priority decision: ignore it
+    // and the pack sustains; rush it and the rest collapse on you.
+    if (this.variant === 'medic') {
+      const M = CONFIG.CONTENT.MEDIC;
+      this.healCd -= dt;
+      const target = this._healTarget(M);
+      if (target && this.onGround && !this.heal && this.healCd <= 0) {
+        this._startHeal(target);
+        this._physics(dt);
+        this._render();
+        return;
+      }
+      // kite: keep a comfortable distance from the player
+      let mdir;
+      if (dist < M.KITE_RANGE) mdir = (-sign(dx)) || (-this.facing);            // retreat
+      else if (dist > M.KITE_RANGE * 1.4) mdir = sign(dx) || this.facing;       // close in
+      else mdir = 0;                                                            // hold
+      const sep = this._sepNudge() * 4;
+      if (mdir !== 0) {
+        this.vx += (mdir * this.v.speed * this.speedMul + sep - this.vx) * clamp01(8 * dt);
+        this.state = this.onGround ? 'run' : 'jump';
+      } else {
+        this.vx += (sep - this.vx) * clamp01(6 * dt);
+        this.state = this.onGround ? 'idle' : 'jump';
+      }
+      // weak self-defense swing if the player crowds us
+      if (this.onGround && dist <= reach && (this.firstStrike || this.attackCd <= 0)) {
+        this._startAttack();
+        this.firstStrike = false;
+      } else if (this.onGround) {
+        this.attackCd -= dt;
       }
       this._physics(dt);
       this._render();
@@ -752,6 +981,15 @@ export class Enemy extends Stickman {
     } else if (this.throw) {
       // ranger throwing windup reads as a committed punch pose
       anim = { state: 'punch', phase: this.throw.phase === 'windup' ? 0.35 : 0.85 };
+    } else if (this.charge) {
+      // charger: windup = a charging squat (punch pose), dash = a lean-in run,
+      // recover = a settling idle. The glow + dash velocity carry the read.
+      if (this.charge.phase === 'windup') anim = { state: 'punch', phase: 0.2 };
+      else if (this.charge.phase === 'dash') anim = { state: 'run', time: this.animTime };
+      else anim = { state: 'idle', time: this.animTime };
+    } else if (this.heal) {
+      // medic: windup = both arms forward (charging cast), recover = idle
+      anim = { state: 'punch', phase: this.heal.phase === 'windup' ? 0.45 : 0.9 };
     } else if (this.state === 'hurt') {
       anim = { state: 'hurt', time: this.hurtTime };
     } else if (this.state === 'run') {
@@ -786,6 +1024,27 @@ export class Enemy extends Stickman {
         this.fillCircle(this.facing * 4, cy, rad);
         this.lineStyle(2, 0xffe26b, pulse);
         this.strokeCircle(this.facing * 4, cy, rad);
+      } else if (this.variant === 'medic') {
+        // glowing medic cross on the chest — green when ready, bright while
+        // channeling a heal. Reads "support" at a glance so the player prioritizes.
+        const cx = 0, cyy = -60 * this.scale;
+        const ch = this.heal && this.heal.phase === 'windup';
+        const pulse = ch ? (0.6 + 0.4 * Math.abs(Math.sin(this.animTime * 18))) : 0.5;
+        const sz = 9 * this.scale;
+        this.fillStyle(ch ? 0x6bff9e : 0x35e1ff, pulse * 0.85);
+        this.fillRect(cx - sz, cyy - 2.5 * this.scale, sz * 2, 5 * this.scale);
+        this.fillRect(cx - 2.5 * this.scale, cyy - sz, 5 * this.scale, sz * 2);
+      } else if (this.variant === 'splitter') {
+        // rocky cracks glow faintly, brightening as HP drops — telegraphs that
+        // something happens when it breaks. The fissure lines read "fragile shell".
+        const frac = 1 - (this.health / this.maxHealth);
+        const cy = -58 * this.scale;
+        const glow = 0.25 + frac * 0.6;
+        this.lineStyle(2, 0xffd23f, glow);
+        this.beginPath();
+        this.moveTo(-10 * this.scale, cy); this.lineTo(2 * this.scale, cy - 8 * this.scale);
+        this.moveTo(2 * this.scale, cy - 8 * this.scale); this.lineTo(8 * this.scale, cy + 4 * this.scale);
+        this.strokePath();
       }
     }
     // hit flash overlay — a soft white disc + thin ring over the torso so the

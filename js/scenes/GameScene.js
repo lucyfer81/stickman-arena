@@ -54,7 +54,7 @@ export class GameScene extends Phaser.Scene {
     this.hitsTaken = 0;
     this.healed = 0;
     this.kills = 0;
-    this.spawned = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0, shielder: 0, bomber: 0, ranger: 0, boss: 0, bossCaster: 0 };
+    this.spawned = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0, shielder: 0, bomber: 0, ranger: 0, charger: 0, medic: 0, splitter: 0, spawnling: 0, boss: 0, bossCaster: 0 };
     this.tierBonuses = 0;
     this.firstBloodDone = false;     // FIRST BLOOD fires once on the run's first non-boss kill
     this.waveFirstSpawn = true;      // wave-2 first spawn is a vanguard mini-elite
@@ -210,8 +210,20 @@ export class GameScene extends Phaser.Scene {
         giveRage: (t) => this._startRage(t || CONFIG.CONTENT.PICKUP.RAGE_TIME),
         dropPickup: (type, x) => this.pickups.push(new Pickup(this, x || this.player.x, this.player.y - 60, type || 'health')),
         spawnFireZone: (x, opts) => this.spawnFireZone(x, opts),
+        spawnIce: (x) => this.spawnFireZone(x || this.player.x, { kind: 'ice', life: CONFIG.CONTENT.ENV.ICE.LIFE, radius: 70, dps: 0 }),
+        spawnShrine: (x) => this.spawnFireZone(x || this.player.x, { kind: 'shrine', life: CONFIG.CONTENT.ENV.SHRINE.LIFE, radius: 58, dps: 0 }),
         spawnProjectileAt: (x0, y0, x1, y1) => this.spawnEnemyProjectile(x0, y0, x1, y1),
         detonateAt: (x) => this._detonateBomber({ x, y: CONFIG.GROUND_Y }),
+        // round-13 content: split a splitter on demand + verify event flags.
+        killSplitter: () => {
+          const e = this.enemies.find((x) => !x.dead && x.variant === 'splitter');
+          if (!e) return false;
+          const before = this.enemies.filter((x) => !x.dead && x.variant === 'spawnling').length;
+          e.takeHit(9999, this.player.x, 320, 0.05);
+          const after = this.enemies.filter((x) => !x.dead && x.variant === 'spawnling').length;
+          return { split: after > before, spawnlings: after };
+        },
+        setFrenzy: (on) => { this.eventFrenzy = !!on; return this.eventFrenzy; },
         // SECOND WIND: force-enter the broken last-stand, force a reform, and
         // fast-forward the window's timer so the expiry path is testable.
         enterSecondWind: () => { if (!this.player.broken && !this.player.dead) { this.player._enterBroken(); return true; } return false; },
@@ -401,6 +413,10 @@ export class GameScene extends Phaser.Scene {
     this.eventSupplyDrop = false;  // drop a care package at wave start
     this.eventMeteors = false;     // spawn meteor strikes during the wave
     this.meteorTimer = 0;
+    // round-13 content variety flags
+    this.eventFrenzy = false;      // FRENZY: enemies fast/aggressive but brittle
+    this.eventAmbush = false;      // AMBUSH: spawns arrive as mirrored pairs
+    this.eventShrines = false;     // BLESSED GROUND: heal shrines in the arena
   }
 
   startWave(n) {
@@ -467,8 +483,8 @@ export class GameScene extends Phaser.Scene {
       // first minute's teaching beats stay uncontested.
       const table = [];
       if (n >= 6) table.push(['ranger', 10]);
-      if (n >= 5) table.push(['shielder', 12]);
-      if (n >= 4) table.push(['bomber', 14], ['leaper', 12]);
+      if (n >= 5) table.push(['shielder', 12], ['charger', 10], ['medic', 8]);
+      if (n >= 4) table.push(['bomber', 14], ['leaper', 12], ['splitter', 10]);
       if (n >= 3) table.push(['brute', 18]);
       if (n >= 2) table.push(['runner', 22]);
       table.push(['grunt', 30]);
@@ -483,15 +499,34 @@ export class GameScene extends Phaser.Scene {
     // the walls, cutting the ~3.2s "walk-up" dead time to ~1.5s. Wave 4+ still
     // spawns at the walls so late-game pressure comes from the edges as before.
     const early = n <= CONFIG.RETENTION.INNER_SPAWN_WAVES;
-    const x = early
-      ? (fromLeft ? CONFIG.WALL_LEFT + CONFIG.RETENTION.INNER_SPAWN_OFFSET
-                  : CONFIG.WALL_RIGHT - CONFIG.RETENTION.INNER_SPAWN_OFFSET)
-      : (fromLeft ? CONFIG.WALL_LEFT + 10 : CONFIG.WALL_RIGHT - 10);
+    const spawnX = (side) => early
+      ? (side ? CONFIG.WALL_LEFT + CONFIG.RETENTION.INNER_SPAWN_OFFSET
+              : CONFIG.WALL_RIGHT - CONFIG.RETENTION.INNER_SPAWN_OFFSET)
+      : (side ? CONFIG.WALL_LEFT + 10 : CONFIG.WALL_RIGHT - 10);
+    this._spawnEnemyAt(variant, fromLeft, spawnX(fromLeft), n);
+    // AMBUSH event: every spawn arrives as a mirrored pair (one each wall) so
+    // the player is flanked from the opening tick — a distinct "surrounded"
+    // encounter shape. The twin counts against the queue (set below); guarded
+    // by MAX_ALIVE so a big wave can't overstuff the arena past the cap.
+    if (this.eventAmbush && this.spawnQueue > 1) {
+      const aliveNow = this.enemies.filter((e) => !e.dead).length;
+      if (aliveNow < CONFIG.ENEMY.MAX_ALIVE) {
+        this._spawnEnemyAt(variant, !fromLeft, spawnX(!fromLeft), n);
+        this.spawnQueue = Math.max(0, this.spawnQueue - 1);
+      }
+    }
+  }
+
+  // shared single-enemy spawn helper (variant + side + x). Extracted from
+  // spawnOne so the AMBUSH mirror can re-use it without duplicating the
+  // passive/scaling/flank/telemetry bookkeeping.
+  _spawnEnemyAt(variant, fromLeft, x, n) {
     const e = new Enemy(this, x, CONFIG.GROUND_Y, variant);
     e.facing = fromLeft ? 1 : -1;
     // DEAD TIME: wall-spawned enemies (wave 4+) get a brief entrance sprint so
     // the ~3.8s walk-up to mid doesn't leave a dead gap. Inner-band spawns are
     // already close, so they don't need it.
+    const early = n <= CONFIG.RETENTION.INNER_SPAWN_WAVES;
     if (!early) e.sprintT = CONFIG.RETENTION.SPRINT_IN.TIME;
     // FIRST-TIME ASSIST: wave 1's opening enemy is a passive training dummy so a
     // confused first-timer gets a safe window to land their first punch (and the
@@ -504,7 +539,7 @@ export class GameScene extends Phaser.Scene {
     // flank assignment: alternating sides, seeded by spawn side, so the pack
     // surrounds the player rather than stacking on one side. Base the slot on
     // LIVING enemies only — lingering death-anims would otherwise skew the count.
-    const aliveCount = this.enemies.filter((e) => !e.dead).length;
+    const aliveCount = this.enemies.filter((o) => !o.dead).length;
     e.flankDir = (aliveCount % 2 === 0) ? (fromLeft ? 1 : -1) : (fromLeft ? -1 : 1);
     this._applyScaling(e, n);
     this.enemies.push(e);
@@ -524,6 +559,14 @@ export class GameScene extends Phaser.Scene {
     const aggrCurve = 0.8 + Math.min(n - 1, 8) * 0.07;
     e.aggrMul = Math.max(CONFIG.RETENTION.EARLY_AGR_FLOOR, aggrCurve) * m.aggr;
     e.dmgMul = m.enemyDmg;
+    // FRENZY event: a glass-cannon remix — enemies move + attack much faster but
+    // are brittle (one or two hits). Completely changes the wave's feel without a
+    // new system: pure stat flip layered on the existing scaling.
+    if (this.eventFrenzy) {
+      e.speedMul *= 1.35;
+      e.aggrMul *= 1.3;
+      e.hpMul *= 0.45;
+    }
     e.health = e.maxHealth = e.maxHealth * e.hpMul;
   }
 
@@ -622,12 +665,21 @@ export class GameScene extends Phaser.Scene {
     this.shockwaves = this.shockwaves.filter((s) => !s.dead);
   }
 
-  // ---- ground-fire hazard layer (bomber blasts + meteor scorch) ----
+  // ---- ground zone layer (fire / ice / shrine) ----
+  // One shared array for all standing zones. `kind` selects the effect + art:
+  //   fire   — dps damages player + enemies (friendly-fire chains), default.
+  //   ice    — no damage, but sets player.slipT so traction drops (kinesthetic
+  //            slip — a feel-change zone, reusing the hazard update/draw loop).
+  //   shrine — inverse: heals the player standing in it (capped per shrine), a
+  //            positive risk/reward objective. Enemies are NOT healed by it.
   spawnFireZone(x, opts = {}) {
+    const kind = opts.kind || 'fire';
     this.hazards.push({
       x, w: (opts.radius || 60) * 2,
       life: opts.life || 3, t: Math.random() * 2,
       tick: 0, dps: opts.dps != null ? opts.dps : 24, dead: false,
+      kind,
+      healLeft: kind === 'shrine' ? CONFIG.CONTENT.ENV.SHRINE.HEAL_CAP : 0,
     });
   }
 
@@ -641,38 +693,91 @@ export class GameScene extends Phaser.Scene {
       hz.t += dt;
       hz.life -= dt;
       if (hz.life <= 0) { hz.dead = true; continue; }
-      // damage player standing in the zone (feet near the ground)
-      hz.tick -= dt;
       const feetClear = CONFIG.GROUND_Y - p.y;
-      if (hz.tick <= 0) {
-        hz.tick = H.TICK;
-        if (hz.dps > 0 && !p.dead && p.invuln <= 0 && feetClear < 30 && Math.abs(p.x - hz.x) < hz.w / 2) {
-          const dmg = Math.max(1, Math.round(hz.dps * H.TICK * this.mods.enemyDmg));
-          if (p.takeHit(dmg, hz.x, CONFIG.ENEMY.KNOCKBACK)) this._onPlayerHurt(null, { from: hz.x });
+      const inside = !p.dead && feetClear < 30 && Math.abs(p.x - hz.x) < hz.w / 2;
+
+      if (hz.kind === 'ice') {
+        // ICE PATCH: no damage. While the player stands in it, flag a short
+        // slip timer the player physics reads to cut traction + steer (a
+        // kinesthetic feel-change, not a new system). Refreshed each frame.
+        if (inside) p.slipT = 0.12;
+      } else if (hz.kind === 'shrine') {
+        // HEAL SHRINE: inverse of fire — restores player HP on a tick, drawn
+        // from a finite per-shrine budget so it can't be farmed forever.
+        hz.tick -= dt;
+        if (hz.tick <= 0) {
+          hz.tick = H.TICK;
+          if (inside && hz.healLeft > 0 && p.health < p.maxHealth) {
+            const amt = Math.min(CONFIG.CONTENT.ENV.SHRINE.HEAL_PER_TICK, hz.healLeft, p.maxHealth - p.health);
+            p.health += amt; hz.healLeft -= amt; this.healed += amt;
+            this.ui.floatText('+' + amt, p.x, p.y - 150, '#6bff9e', 18);
+            this.burst(hz.x, CONFIG.GROUND_Y - 30, 0x6bff9e, 4);
+          }
+        }
+      } else {
+        // FIRE (default): damage player standing in the zone (feet near ground)
+        hz.tick -= dt;
+        if (hz.tick <= 0) {
+          hz.tick = H.TICK;
+          if (hz.dps > 0 && inside && p.invuln <= 0) {
+            const dmg = Math.max(1, Math.round(hz.dps * H.TICK * this.mods.enemyDmg));
+            if (p.takeHit(dmg, hz.x, CONFIG.ENEMY.KNOCKBACK)) this._onPlayerHurt(null, { from: hz.x });
+          }
+        }
+        // damage enemies standing in the fire (emergent friendly-fire chains)
+        if (hz.dps > 0) {
+          for (const e of this.enemies) {
+            if (e.dead || e.isBoss) continue;
+            if (Math.abs(e.x - hz.x) < hz.w / 2) e.takeHit(hz.dps * dt, hz.x, 0, 0);
+          }
         }
       }
-      // damage enemies standing in the fire (emergent friendly-fire chains)
-      if (hz.dps > 0) {
-        for (const e of this.enemies) {
-          if (e.dead || e.isBoss) continue;
-          if (Math.abs(e.x - hz.x) < hz.w / 2) e.takeHit(hz.dps * dt, hz.x, 0, 0);
-        }
-      }
-      // draw flame — layered flickering tongues, fading as it dies out
+
+      // ---- per-kind art (all on the shared fireLayer) ----
       const fade = clamp01(hz.life / 0.6);
       const cx = hz.x, gy = CONFIG.GROUND_Y;
-      g.fillStyle(0xff7a00, 0.22 * fade);
-      g.fillEllipse(cx, gy + 2, hz.w * 1.25, 14);
-      const tongues = 5;
-      for (let i = 0; i < tongues; i++) {
-        const frac = i / (tongues - 1);
-        const baseX = cx + (frac - 0.5) * hz.w;
-        const fh = 26 + Math.sin(hz.t * 11 + i * 1.7) * 12 + Math.cos(hz.t * 7 + i) * 6;
-        g.fillStyle(i % 2 ? 0xffd23f : 0xff9a3d, 0.55 * fade);
-        g.fillTriangle(baseX - 7, gy, baseX + 7, gy, baseX + Math.sin(hz.t * 9 + i) * 4, gy - Math.max(8, fh));
+      if (hz.kind === 'ice') {
+        // translucent cyan sheet + frost crack lines + drifting glints
+        g.fillStyle(0x6bcfe8, 0.20 * fade);
+        g.fillEllipse(cx, gy + 2, hz.w * 1.2, 16);
+        g.fillStyle(0xbfeaff, 0.32 * fade);
+        g.fillEllipse(cx, gy + 2, hz.w * 0.9, 11);
+        g.lineStyle(2, 0xeaf8ff, 0.55 * fade);
+        for (let i = 0; i < 4; i++) {
+          const fx = cx + (i / 3 - 0.5) * hz.w * 0.8;
+          g.beginPath();
+          g.moveTo(fx, gy - 2); g.lineTo(fx + Math.sin(hz.t + i) * 4, gy - 14);
+          g.strokePath();
+        }
+      } else if (hz.kind === 'shrine') {
+        // golden rune circle + rising motes + a soft green core while it has
+        // charge left; dims as the budget runs out.
+        const charged = clamp01(hz.healLeft / CONFIG.CONTENT.ENV.SHRINE.HEAL_CAP);
+        const ring = 0.4 + 0.4 * Math.abs(Math.sin(hz.t * 3));
+        g.lineStyle(3, 0xffd23f, ring * fade);
+        g.strokeEllipse(cx, gy + 2, hz.w * 0.95, 18);
+        g.fillStyle(0x6bff9e, (0.14 + 0.16 * charged) * fade);
+        g.fillEllipse(cx, gy + 2, hz.w * 0.85, 13);
+        g.fillStyle(0xffffff, 0.6 * fade * charged);
+        for (let i = 0; i < 3; i++) {
+          const a = hz.t * 1.5 + i * 2.1;
+          g.fillCircle(cx + Math.cos(a) * hz.w * 0.3, gy - 6 - (i * 6) - (hz.t * 14 % 10), 2);
+        }
+      } else {
+        // flame — layered flickering tongues, fading as it dies out
+        g.fillStyle(0xff7a00, 0.22 * fade);
+        g.fillEllipse(cx, gy + 2, hz.w * 1.25, 14);
+        const tongues = 5;
+        for (let i = 0; i < tongues; i++) {
+          const frac = i / (tongues - 1);
+          const baseX = cx + (frac - 0.5) * hz.w;
+          const fh = 26 + Math.sin(hz.t * 11 + i * 1.7) * 12 + Math.cos(hz.t * 7 + i) * 6;
+          g.fillStyle(i % 2 ? 0xffd23f : 0xff9a3d, 0.55 * fade);
+          g.fillTriangle(baseX - 7, gy, baseX + 7, gy, baseX + Math.sin(hz.t * 9 + i) * 4, gy - Math.max(8, fh));
+        }
+        g.fillStyle(0xff3b30, 0.6 * fade);
+        g.fillEllipse(cx, gy, hz.w * 0.7, 10);
       }
-      g.fillStyle(0xff3b30, 0.6 * fade);
-      g.fillEllipse(cx, gy, hz.w * 0.7, 10);
     }
     this.hazards = this.hazards.filter((h) => !h.dead);
   }
@@ -954,6 +1059,50 @@ export class GameScene extends Phaser.Scene {
     const rage = new Pickup(this, cx + 44, 90, 'rage', { drop: true });
     this.pickups.push(gold, rage);
     this.ui.floatText('SUPPLY!', cx, 160, '#35e1ff', 26);
+  }
+
+  // ---- BLESSED GROUND event: heal shrines ----
+  // Drops two heal shrines at offset arena positions so the player has a reason
+  // to hold ground (risk/reward positioning). Reuses the hazard array via kind.
+  _dropShrines() {
+    const S = CONFIG.CONTENT.ENV.SHRINE;
+    const cx = this.player.x;
+    const a = clamp(cx - 240, CONFIG.WALL_LEFT + 80, CONFIG.WALL_RIGHT - 200);
+    const b = clamp(cx + 240, CONFIG.WALL_LEFT + 200, CONFIG.WALL_RIGHT - 80);
+    this.spawnFireZone(a, { kind: 'shrine', life: S.LIFE, radius: 58, dps: 0 });
+    this.spawnFireZone(b, { kind: 'shrine', life: S.LIFE, radius: 58, dps: 0 });
+    this.ui.floatText('BLESSED', a, CONFIG.GROUND_Y - 90, '#6bff9e', 22);
+    this.ui.floatText('BLESSED', b, CONFIG.GROUND_Y - 90, '#6bff9e', 22);
+  }
+
+  // ---- splitter death: fissure into spawnlings ----
+  // The scene owns the enemy array + scaling, so the splitter's _die routes
+  // here. Two spawnlings pop out at offsets, inheriting the wave/difficulty
+  // curve so the adds are a real threat (not free). A burst sells the split.
+  _onSplitterDeath(e) {
+    const n = Math.max(1, CONFIG.CONTENT.SPLITTER.SPAWN_COUNT);
+    for (let i = 0; i < n; i++) {
+      const side = i === 0 ? -1 : 1;
+      const x = clamp(e.x + side * 34, CONFIG.WALL_LEFT + 10, CONFIG.WALL_RIGHT - 10);
+      const kid = new Enemy(this, x, CONFIG.GROUND_Y, 'spawnling');
+      kid.facing = side; kid.flankDir = side;
+      kid.vx = side * 120; kid.vy = -260; kid.onGround = false; // pop out
+      this._applyScaling(kid, Math.max(1, this.wave));
+      if (this.spawned && this.spawned.spawnling != null) this.spawned.spawnling++;
+      this.enemies.push(kid);
+    }
+    this.burst(e.x, e.y - 70, 0xb58860, 22);
+    this.burst(e.x, e.y - 70, 0xffd23f, 12);
+    this.dustBurst(e.x, CONFIG.GROUND_Y, 12);
+  }
+
+  // ---- medic heal beam (called from Enemy._progressHeal) ----
+  // A quick green ring + spark on the target + a thin beam line so the heal
+  // pulse reads clearly. Routed through the shared fx helpers (no new layer).
+  _healBeam(x0, y0, target) {
+    if (this._impactRing) this._impactRing(target.x, target.y - 60, 0x6bff9e, CONFIG.FEEL.RING.HIT);
+    this.burst(target.x, target.y - 60, 0x6bff9e, 12);
+    this.audio && this.audio.combo && this.audio.combo(7);
   }
 
   // ---- SECOND WIND ("The Broken") ----
@@ -1582,7 +1731,7 @@ export class GameScene extends Phaser.Scene {
 
   _updateHUD() {
     const alive = this.enemies.filter((e) => !e.dead);
-    const counts = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0, shielder: 0, bomber: 0, ranger: 0, boss: 0, bossCaster: 0 };
+    const counts = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0, shielder: 0, bomber: 0, ranger: 0, charger: 0, medic: 0, splitter: 0, spawnling: 0, boss: 0, bossCaster: 0 };
     for (const e of alive) if (counts[e.variant] != null) counts[e.variant]++;
     // boss HP for the top-of-screen bar (null when no boss is alive)
     const bossAlive = this.boss && !this.boss.dead ? this.boss : null;

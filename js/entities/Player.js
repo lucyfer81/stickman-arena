@@ -36,6 +36,11 @@ export class Player extends Stickman {
     // ≈ a ready Overdrive ~15-20s in for anyone who lands a hit.
     this.burst = CONFIG.BURST.START_METER || 0;
     this.burstMax = CONFIG.BURST.METER_MAX;
+    // ICE PATCH: a short slip timer refreshed each frame by an ice hazard zone
+    // while the player stands in it. While >0, ground traction + steer drop so
+    // the player slides — a kinesthetic feel-change (no new system; the hazard
+    // layer sets the flag, the player physics reads it).
+    this.slipT = 0;
   }
 
   setPalette(p) { this.palette = p; }
@@ -142,6 +147,7 @@ export class Player extends Stickman {
   update(dt, input) {
     this.animTime += dt;
     if (this.invuln > 0) this.invuln -= dt;
+    if (this.slipT > 0) this.slipT -= dt;
 
     // SECOND WIND: tick the broken-window timer. Running out = real death.
     if (this.broken && !this.dead) {
@@ -204,13 +210,19 @@ export class Player extends Stickman {
     // can actually chase a heal drop or escape pressure.
     const speedMul = this.broken ? CONFIG.LASTSTAND.SPEED_MUL : 1;
     const target = input.dir * CONFIG.PLAYER.SPEED * speedMul;
-    const accel = this.onGround ? CONFIG.PLAYER.ACCEL : CONFIG.PLAYER.AIR_ACCEL;
+    // ICE PATCH: while slippery, traction (friction) and steer (accel) both
+    // drop sharply so the player keeps momentum and turns sluggishly — the
+    // signature "slide on ice" feel. Pure multiplier, no new state machine.
+    const slipping = this.slipT > 0 && this.onGround;
+    const slipFr = slipping ? CONFIG.CONTENT.ENV.ICE.FRICTION_SCALE : 1;
+    const slipAc = slipping ? CONFIG.CONTENT.ENV.ICE.ACCEL_SCALE : 1;
+    const accel = (this.onGround ? CONFIG.PLAYER.ACCEL : CONFIG.PLAYER.AIR_ACCEL) * slipAc;
     if (input.dir !== 0) {
       this.vx += (target - this.vx) * clamp01(accel * dt / Math.max(1, Math.abs(target - this.vx)));
       this.vx = clamp(this.vx, -CONFIG.PLAYER.SPEED * speedMul, CONFIG.PLAYER.SPEED * speedMul);
       this.facing = input.dir;
     } else {
-      const fr = CONFIG.PLAYER.FRICTION * dt;
+      const fr = CONFIG.PLAYER.FRICTION * slipFr * dt;
       if (Math.abs(this.vx) <= fr) this.vx = 0;
       else this.vx -= Math.sign(this.vx) * fr;
     }

@@ -671,3 +671,62 @@ Top10与修复顺序详见 DESIGN.md Round 10。本轮先修 #1 资源循环（�
 - AFK persona（永不按 J）只能被"延迟死亡"救——休战给 12s 安全窗，过了仍会流血。但 12s 足以读完屏幕、看到"PRESS J"救生圈、试着按一下。目标人群是"会试 J 但需要一点时间"的远更大群体。
 - B3 保底治疗在 casual/mobile 本轮未触发（wave1 击杀不到3即进入 wave2）——它是安全网，主治疗环（磁铁+掉率）仍工作；casual 本轮终血82（健康）。
 - 留存是结构/机制代理指标 + Playwright 遥测，非真人手感。
+
+## Round 13 — 内容多样性扩展（敌人 / 遭遇 / 稀有事件 / 环境交互）
+
+任务前提：**攻"游戏重复感"，只加内容、不改系统架构**。所有新机制复用既有模式
+（VARIANTS 字典、slam/cast 状态机、throw windup、hazard 数组、shockwave 数组、
+事件 flags 总线、banner/slowmo 反馈原语）。本环境 Chromium 库已就位，全部测试实跑。
+
+### 新增 4 类内容
+
+**1. 敌人多样性**（`Enemy.js` VARIANTS + 专属 AI 分支 + 装备叠层）
+- **charger**（暗红、44hp）：中距触发**预警冲锋**（0.55s 蓄力→620px/s 锁定直线冲刺
+  0.5s→0.6s 硬直），冲刺期**超甲**（轻击无效、重踢可断，镜像 boss-slam 模型），
+  冲刺期高 hitbox。填补"地面逼走位/跳跃"niche（区别于 leaper 防空）。counter=跳/侧移。
+- **medic**（白青、30hp）：kite 保持距离，对范围内**最低血友军**引导治疗脉冲（0.7s 蓄力
+  →+18hp+绿光束，复用 throw windup+`_healBeam`）。弱近战自卫。逼**目标优先级**决策。
+- **splitter**（棕岩、40hp）：标准近战，**死亡分裂**为 2 个 spawnling（`_onSplitterDeath`
+  场景钩子，继承波次缩放）。奖励过杀（免增员）、制造涌现式群体压力。裂纹辉光随血量降低变亮。
+- **spawnling**（小棕、12hp、scale 0.7、速 210）：仅由 splitter 死亡产生，小而脆且凶。
+
+**2. 环境交互**（复用 hazard 数组，新增 `kind` 字段，三种区域共用 update+draw 循环）
+- **ice patch**（打滑区）：无伤害，玩家站入设 `player.slipT`，Player 物理读它把
+  摩擦×0.06、转向×0.35——**动感变化**（滑行），非新系统。青色冰板+霜裂纹+漂移冰晶。
+- **heal shrine**（治疗神龛）：火区逆极性——站入按 tick 回血（每 tick 6，每龛上限 70），
+  有**争夺点**意味。金色符文环+绿核心+上升光点；敌人不受其治疗。
+- 火（原有）逻辑零改动，仅分支化。
+
+**3. 遭遇/稀有事件**（`js/systems/Events.js` + GameScene flags，事件 8→12）
+- **FRENZY**（玻璃大炮波，wave≥4）：`eventFrenzy` → `_applyScaling` 速×1.35、激进度×1.3、
+  血×0.45。纯粹数值翻转，整波"快而脆"，体验完全不同。
+- **AMBUSH**（镜像夹击，wave≥4）：`eventAmbush`+extraSpawns+1 → 每次 spawn 镜像出双侧
+  （`_spawnEnemyAt` 抽取，MAX_ALIVE 守卫）。开局即被两侧夹击的"包围"形状。
+- **PLAGUE**（医疗兵+炸弹波，wave≥5）：`eventVariantPool=['medic','bomber','medic','charger']`。
+  支援+混乱组合，"先杀医疗兵"的目标优先级练习。
+- **BLESSED GROUND**（神龛波，wave≥3）：`eventShrines`→`_dropShrines` 在两侧各投一个治疗神龛。
+  正向"喘息+争夺"波，仍带正常敌人。
+
+**4. 接入**（零系统改动）
+- spawn 加权表加 charger(wave≥5)/medic(wave≥5)/splitter(wave≥4)，wave1 仍纯 grunt、
+  wave2 仍 vanguard 首刷（retention 约定不变）。
+- `_applyScaling` 加 frenzy 分支（flag off 时 no-op）。
+- `_updateHazards` 重写为 kind 分发（fire/ice/shrine），火区行为字面保留。
+- `spawned`/`counts`/遥测加 charger/medic/splitter/spawnling；`__test` 加 spawnIce/spawnShrine/
+  killSplitter/setFrenzy 钩子；`_spawnEnemyAt` 抽取自 spawnOne 供 ambush 复用。
+
+### 验证（实跑，零回归）
+- 新增 `tests/variety2.spec.js` **10/10**：charger 冲锋+超甲+hitbox、medic 治疗最低血友军、
+  splitter 死亡分裂≥2 spawnling、ice 设 slipT+滑行实测、shrine 回血、frenzy 数值翻转、
+  ambush 每次出 2、plague 池、blessed 投 2 龛、事件总数≥12。
+- 原有 `variety` **10/10** 全绿（事件总数从 8 涨到 12，断言 `>=8` 不破坏）。
+- 官方 CI **5/5**（桌面×3 + 移动横/竖）。
+- dev 关键套件 **33/33**：depth3、swarm3、qa7（含 1min 尸体动画+30s 无完美重叠）、
+  boss3、burst8（含 75s 真人 wave5 Boss+4 大招）、laststand4、retention5。
+- ASCII+imgstat 抓帧确认：charger(R)/medic/splitter 火柴人 + 右侧冰板/神龛青色光区均可见，
+  全程零 pageerror。
+
+### 趣味评估
+这轮杠杆是让**每一波都可能不一样**且**每种敌人逼不同应对**：冲锋要跳/侧移、医疗兵要
+优先击杀、分裂要过杀、冰面要控速、神龛要争夺；加 4 个事件让波次形状不再单调（玻璃/夹击/
+瘟疫/祝福）。重复感显著下降。仍是代理指标+遥测，非真人手感。
