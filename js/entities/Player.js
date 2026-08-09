@@ -1,4 +1,4 @@
-import { Stickman } from './Stickman.js';
+import { Stickman, computePose } from './Stickman.js';
 import { CONFIG, COLORS } from '../config.js';
 import { clamp, clamp01, easeOut, easeIn, sign } from '../utils/math.js';
 
@@ -77,6 +77,19 @@ export class Player extends Stickman {
       whiffChecked: false,
     };
     this.state = type;
+    // ANTICIPATION: a small dust puff at attack start reads as the player
+    // planting their foot for the swing — sells the windup before the fist
+    // even extends. Purely cosmetic; no physics effect.
+    if (this.onGround && this.scene && this.scene.dustBurst) {
+      this.scene.dustBurst(this.x - this.facing * 14, CONFIG.GROUND_Y, 5);
+    }
+    // SQUASH: anticipation squat — body widens and shortens for a frame to
+    // store energy before the strike. The active-phase stretch below inverts
+    // this, giving the silhouette a clear windup->release arc.
+    if (CONFIG.FEEL && CONFIG.FEEL.STRETCH) {
+      const w = CONFIG.FEEL.STRETCH.WINDUP;
+      this.pushStretch(w.sx, w.sy);
+    }
     if (type === 'punch') this.scene.audio && this.scene.audio.punch();
     else this.scene.audio && this.scene.audio.kick();
   }
@@ -162,6 +175,7 @@ export class Player extends Stickman {
       this.deadT += dt / 0.7;
       this._physics(dt, false);
       this._alpha = clamp01(1 - (this.deadT - 0.7) * 2) * (this.invuln > 0 ? 0.5 : 1);
+      this.tickStretch(dt);
       this._render();
       return;
     }
@@ -183,6 +197,17 @@ export class Player extends Stickman {
           a.total = a.windup + a.active + a.recover;
         }
       }
+      // SQUASH-&-STRETCH: at the active-window peak the body elongates along
+      // the strike axis — the "reaching" silhouette that sells the strike arc.
+      // Fires once per swing on entry to the active phase so it doesn't fight
+      // the natural ease-back in tickStretch.
+      if (!a._activeStretched && a.t >= a.windup && CONFIG.FEEL && CONFIG.FEEL.STRETCH) {
+        a._activeStretched = true;
+        const s = CONFIG.FEEL.STRETCH.ACTIVE;
+        // a kick extends along the horizontal axis more (foot reaches far);
+        // a punch is a more compact forward thrust. We bias the stretch along x.
+        this.pushStretch(a.type === 'kick' ? s.sx * 1.02 : s.sx, s.sy);
+      }
       // friction on ground during attack
       this._physics(dt, true);
       // queue next attack near end of recover for combo feel handled by scene reading input
@@ -190,6 +215,7 @@ export class Player extends Stickman {
         this.attack = null;
         this.state = this.onGround ? 'idle' : 'jump';
       }
+      this.tickStretch(dt);
       this._render();
       return;
     }
@@ -200,6 +226,7 @@ export class Player extends Stickman {
       if (this.hurtTime > 0.34 && this.onGround) {
         this.state = 'idle';
       }
+      this.tickStretch(dt);
       this._render();
       return;
     }
@@ -251,6 +278,7 @@ export class Player extends Stickman {
     else if (Math.abs(this.vx) > 12) this.state = 'run';
     else this.state = 'idle';
 
+    this.tickStretch(dt);
     this._render();
   }
 
@@ -276,7 +304,14 @@ export class Player extends Stickman {
           // the impact actual weight (was a near-imperceptible 0.004 shake).
           if (this.scene._impactRing) this.scene._impactRing(this.x, CONFIG.GROUND_Y - 6, 0x6b86a3, { life: 0.18, maxR: 40, width: 3 });
           if (this.scene._punchZoom) this.scene._punchZoom(0.014, 0, 0);
-          this.scene.cameras.main.shake(70, 0.008);
+          if (this.scene._shake) this.scene._shake(2.4, 0.14, 36, 0, 1);
+          // SQUASH: a hard landing splats the body wide and short for a frame,
+          // then rebounds — the classic impact silhouette. Pairs with the dust
+          // + ring + zoom so the landing reads as a single weighted beat.
+          if (CONFIG.FEEL && CONFIG.FEEL.STRETCH) {
+            const s = CONFIG.FEEL.STRETCH.LAND;
+            this.pushStretch(s.sx, s.sy);
+          }
         }
       }
       this.vy = 0;
@@ -324,6 +359,27 @@ export class Player extends Stickman {
     // mask on the pose so the base renderer skips those segments.
     this.limbMask = this.broken ? { dropRightArm: true } : null;
     this.render(anim);
+    // MOTION TRAIL: during a swing's active window, sample the striking limb
+    // position each frame so the scene can draw a fading streak behind it.
+    // Reads as motion blur and makes the strike arc readable at a glance. We
+    // re-evaluate the pose here (cheap pure function) to get the limb point.
+    if (this.attack && this.scene && this.scene._pushTrail) {
+      const a = this.attack;
+      const inActive = a.t >= a.windup && a.t <= a.windup + a.active;
+      // also trail the early recover so the arc finishes naturally
+      if (inActive || (a.t <= a.windup + a.active + 0.05)) {
+        const pose = computePose(anim);
+        const limb = a.type === 'kick' ? pose.footR : pose.handR;
+        if (limb) {
+          const wx = this.x + this.facing * limb.x;
+          const wy = this.y - limb.y;
+          const col = a.type === 'kick'
+            ? (this.palette && this.palette.accent ? this.palette.accent : 0x35e1ff)
+            : (this.palette && this.palette.fist ? this.palette.fist : 0xffe26b);
+          this.scene._pushTrail(wx, wy, col, 'p:' + a.type);
+        }
+      }
+    }
   }
 
   getAnimDebug() { return this.state; }

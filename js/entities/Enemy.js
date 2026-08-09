@@ -157,7 +157,10 @@ export class Enemy extends Stickman {
   }
 
   bodyBox() {
-    const s = this.scale;
+    // use the BASE scale (not the live scaleX, which is currently base*squash
+    // during a squash-&-stretch deformation) so hit detection stays stable
+    // through impact frames — a squashed body mustn't become harder to hit.
+    const s = this._baseScaleX || this.scale || 1;
     return { x: this.x - 26 * s, y: this.y - NECK * s - 10, w: 52 * s, h: NECK * s + 10 };
   }
 
@@ -193,8 +196,22 @@ export class Enemy extends Stickman {
     this.passive = false;
 
     this.health -= dmg;
-    this.flashTime = 0.12;
+    this.flashTime = 0.14; // slightly longer so the chromatic edges of the new flash read
     const dir = sign(this.x - fromX) || 1;
+    // SQUASH-&-STRETCH: deform along the blow axis for a few frames — the
+    // single most readable "this got hit" tell. A kill goes bigger; a heavy
+    // kick goes bigger than a punch. The body widens (sx<1) and elongates
+    // vertically (sy>1) for a horizontal blow, then rebounds via tickStretch.
+    // Faces-aware: when the blow comes from the side, the deform is along x;
+    // we mirror sx/sy for a "vertical" feel since the stickman is upright.
+    if (CONFIG.FEEL && CONFIG.FEEL.STRETCH) {
+      const S = CONFIG.FEEL.STRETCH;
+      let spec = S.HEAVY, lifeOverride = null;
+      if (this.health <= 0) spec = S.KILL;
+      else if (heavy) spec = S.HEAVY;
+      else spec = S.HIT;
+      this.pushStretch(spec.sx, spec.sy);
+    }
     // a kill always applies, regardless of armor
     if (this.health <= 0) { this._die(dir); return true; }
 
@@ -422,11 +439,14 @@ export class Enemy extends Stickman {
 
   getHitbox(player) {
     if (this.dead) return null;
+    // hitbox geometry uses the BASE scale (combat-stable through squash frames;
+    // a squashed attacker mustn't get a shifted swing arc).
+    const sc = this._baseScaleX || this.scale || 1;
     // CHARGER dash: a tall, body-following hitbox during the dash phase so the
     // charge connects with anyone in its lane (mirrors the leaper dive shape).
     if (this.charge && this.charge.phase === 'dash') {
       const w = 78, h = 150;
-      return { x: this.x - w / 2, y: this.y - NECK * this.scale - h * 0.5, w, h, dmg: Math.round(this.v.damage * this.dmgMul), kb: CONFIG.ENEMY.KNOCKBACK, from: this.x };
+      return { x: this.x - w / 2, y: this.y - NECK * sc - h * 0.5, w, h, dmg: Math.round(this.v.damage * this.dmgMul), kb: CONFIG.ENEMY.KNOCKBACK, from: this.x };
     }
     if (!this.attack) return null;
     const a = this.attack;
@@ -435,18 +455,22 @@ export class Enemy extends Stickman {
     if (a.leap) {
       // tall, body-following hitbox so a jumping target gets caught mid-dive
       const w = 86, h = 176;
-      return { x: this.x - w / 2, y: this.y - NECK * this.scale - h * 0.5, w, h, dmg: Math.round(this.v.damage * this.dmgMul), kb: CONFIG.ENEMY.KNOCKBACK, from: this.x };
+      return { x: this.x - w / 2, y: this.y - NECK * sc - h * 0.5, w, h, dmg: Math.round(this.v.damage * this.dmgMul), kb: CONFIG.ENEMY.KNOCKBACK, from: this.x };
     }
     const cx = this.x + this.facing * (reach * 0.5 + 6);
     const w = reach;
     const h = 104; // tall enough that a low hop won't fully sidestep the swing
-    return { x: cx - w / 2, y: this.y - NECK * this.scale - h * 0.42, w, h, dmg: Math.round(this.v.damage * this.dmgMul), kb: CONFIG.ENEMY.KNOCKBACK, from: this.x };
+    return { x: cx - w / 2, y: this.y - NECK * sc - h * 0.42, w, h, dmg: Math.round(this.v.damage * this.dmgMul), kb: CONFIG.ENEMY.KNOCKBACK, from: this.x };
   }
 
   update(dt, player) {
     this.animTime += dt;
     if (this.flashTime > 0) this.flashTime -= dt;
     if (this.sprintT > 0) this.sprintT -= dt;
+    // SQUASH-&-STRETCH: decay any active impact deformation back to neutral.
+    // Runs every frame for every state (alive/dead/attacking) so a hit during
+    // any phase still rebounds cleanly. The push happens in takeHit below.
+    this.tickStretch(dt);
 
     if (this.dead) {
       this.deadT += dt / 0.7;
@@ -832,7 +856,10 @@ export class Enemy extends Stickman {
     const scene = this.scene;
     if (scene._impactRing) scene._impactRing(this.x, CONFIG.GROUND_Y - 10, 0xff3b30, scene._ringSpec ? scene._ringSpec('SLAM') : { life: 0.4, maxR: 120, width: 6 });
     if (scene._punchZoom) scene._punchZoom(CONFIG.FEEL.ZOOM.SLAM, 0, CONFIG.FEEL.SHOVE.DOWN);
-    scene.cameras.main.shake(210, 0.022);
+    if (scene._shake) {
+      const S = CONFIG.FEEL.SHAKE.SLAM;
+      scene._shake(S.amp, S.life, S.freq, 0, 1);
+    } else { scene.cameras.main.shake(210, 0.022); }
     scene.dustBurst && scene.dustBurst(this.x, CONFIG.GROUND_Y, 28);
     scene.audio && scene.audio.bigHit();
   }
@@ -888,7 +915,10 @@ export class Enemy extends Stickman {
     // to match the caster palette so the source of the barrage reads clearly.
     if (scene._impactRing) scene._impactRing(this.x, y0, 0x9aff6b, scene._ringSpec ? scene._ringSpec('HEAVY') : { life: 0.28, maxR: 66, width: 5 });
     if (scene._punchZoom) scene._punchZoom(CONFIG.FEEL.ZOOM.HEAVY, 0, 0);
-    scene.cameras.main.shake(120, 0.012);
+    if (scene._shake) {
+      const S = CONFIG.FEEL.SHAKE.HEAVY;
+      scene._shake(S.amp * 0.7, S.life, S.freq, 0, 0.5);
+    } else { scene.cameras.main.shake(120, 0.012); }
     scene.audio && scene.audio.bigHit && scene.audio.bigHit();
   }
 
@@ -1047,13 +1077,23 @@ export class Enemy extends Stickman {
         this.strokePath();
       }
     }
-    // hit flash overlay — a soft white disc + thin ring over the torso so the
-    // player reads that the strike landed (the lineStyle was previously set but
-    // never stroked, so the ring was missing entirely).
+    // hit flash overlay — a layered stack: white-hot core disc, chromatic ring
+    // (cyan outside / magenta inside, the classic "impact" hue split), and a
+    // thin white ring. Scales with the flash window so a heavy hit (longer
+    // flashTime) reads brighter for longer. The chromatic split sells the
+    // "energy" of the connection far more than a flat white disc.
     if (this.flashTime > 0) {
-      const fa = clamp01(this.flashTime / 0.12);
-      this.fillStyle(0xffffff, fa * 0.5);
-      this.fillCircle(0, -60 * this.scale, 40 * this.scale);
+      const fa = clamp01(this.flashTime / 0.14);
+      // outer cyan halo
+      this.fillStyle(0x35e1ff, fa * 0.35);
+      this.fillCircle(0, -60 * this.scale, 46 * this.scale);
+      // white-hot core
+      this.fillStyle(0xffffff, fa * 0.55);
+      this.fillCircle(0, -60 * this.scale, 38 * this.scale);
+      // inner magenta punch (reads as the strike point)
+      this.fillStyle(0xff5cb0, fa * 0.30);
+      this.fillCircle(0, -60 * this.scale, 24 * this.scale);
+      // crisp white ring — the snap outline
       this.lineStyle(3, 0xffffff, fa);
       this.strokeCircle(0, -60 * this.scale, 40 * this.scale);
     }
