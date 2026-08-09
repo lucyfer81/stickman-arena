@@ -27,6 +27,10 @@ export const ACTIONS = [
 export const SHAKE_MODES = ['full', 'reduced', 'off'];
 const SHAKE_SCALE = { full: 1, reduced: 0.4, off: 0 };
 
+// Mobile haptics (navigator.vibrate). On for touch by default; a toggle so
+// players who dislike rumble can kill it. No-op on desktop (no vibrator).
+export const HAPTICS_MODES = ['on', 'off'];
+
 // ESC is reserved (pause / cancel-capture) so it can never be bound to an action.
 const RESERVED = new Set(['ESC', 'ESCAPE']);
 
@@ -62,6 +66,7 @@ const LABELS = {
 export const Options = {
   ACTIONS,
   SHAKE_MODES,
+  HAPTICS_MODES,
 
   defaults: defaultBindings,
 
@@ -80,7 +85,7 @@ export const Options = {
     // remove the key from any other action first (swap-out), then assign
     for (const a of ACTIONS) if (b[a.id] === keyName) b[a.id] = b[action] || a.default;
     b[action] = keyName;
-    save({ bindings: b, shakeMode: this.shakeMode() });
+    this._persist(b, this.shakeMode(), this.hapticsMode());
     return true;
   },
 
@@ -94,7 +99,7 @@ export const Options = {
     return null;
   },
 
-  resetBindings() { save({ bindings: defaultBindings(), shakeMode: this.shakeMode() }); },
+  resetBindings() { this._persist(defaultBindings(), this.shakeMode(), this.hapticsMode()); },
 
   shakeMode() {
     const raw = load();
@@ -103,10 +108,27 @@ export const Options = {
   },
   setShakeMode(mode) {
     if (SHAKE_MODES.indexOf(mode) < 0) return;
-    save({ bindings: this.bindings(), shakeMode: mode });
+    this._persist(this.bindings(), mode, this.hapticsMode());
   },
   // amplitude multiplier the impulse-shake reads each call (cached => cheap)
   shakeScale() { return SHAKE_SCALE[this.shakeMode()] != null ? SHAKE_SCALE[this.shakeMode()] : 1; },
+
+  hapticsMode() {
+    const raw = load();
+    const m = raw && raw.haptics;
+    return HAPTICS_MODES.indexOf(m) >= 0 ? m : 'on';
+  },
+  setHapticsMode(mode) {
+    if (HAPTICS_MODES.indexOf(mode) < 0) return;
+    this._persist(this.bindings(), this.shakeMode(), mode);
+  },
+  haptics() { return this.hapticsMode() === 'on'; },
+
+  // internal: write the full settings object atomically (so no setter erases
+  // another field — each carries the complete current state).
+  _persist(bindings, shakeMode, haptics) {
+    save({ bindings, shakeMode, haptics });
+  },
 
   keyLabel(name) {
     if (!name) return '\u2014';

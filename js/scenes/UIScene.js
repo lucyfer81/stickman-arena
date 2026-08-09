@@ -464,10 +464,16 @@ export class UIScene extends Phaser.Scene {
           fontFamily: 'Arial Black', fontSize: '8px', color: '#0b1a2a',
         }).setOrigin(0.5).setDepth(101);
       }
-      // ready hint: pulse the prompt at the bar
-      this._burstLabel.setText(ready ? (this._touchVisible ? 'TAP \u26A1 OVERDRIVE' : 'OVERDRIVE \u2014 PRESS L') : 'OVERDRIVE');
-      this._burstLabel.setColor(ready ? '#0b1a2a' : '#7a5e1a');
-      this._burstLabel.setAlpha(ready ? 0.95 * pulse : 0.5);
+      // ready hint: pulse the prompt at the bar. Guard against the scene-teardown
+      // race where a re-launched UI's text texture isn't fully initialized on the
+      // first update tick (setColor can throw on a half-built Text during a
+      // GameOver -> Game quick-retry transition). A destroyed/unready text is
+      // skipped for the frame — the next tick it's fine.
+      if (this._burstLabel && this._burstLabel.scene) {
+        this._burstLabel.setText(ready ? (this._touchVisible ? 'TAP \u26A1 OVERDRIVE' : 'OVERDRIVE \u2014 PRESS L') : 'OVERDRIVE');
+        this._burstLabel.setColor(ready ? '#0b1a2a' : '#7a5e1a');
+        this._burstLabel.setAlpha(ready ? 0.95 * pulse : 0.5);
+      }
     }
 
     // RAGE bar — a thin orange bar under the OVERDRIVE bar that only appears while the
@@ -488,8 +494,8 @@ export class UIScene extends Phaser.Scene {
           fontFamily: 'Arial Black', fontSize: '9px', color: '#ffffff',
         }).setOrigin(0.5).setDepth(101);
       }
-      this._rageLabel.setAlpha(0.9 * rfrac);
-    } else if (this._rageLabel) {
+      if (this._rageLabel && this._rageLabel.scene) this._rageLabel.setAlpha(0.9 * rfrac);
+    } else if (this._rageLabel && this._rageLabel.scene) {
       this._rageLabel.setAlpha(0);
     }
 
@@ -516,9 +522,11 @@ export class UIScene extends Phaser.Scene {
           stroke: '#0b1a2a', strokeThickness: 4,
         }).setOrigin(0.5).setDepth(101);
       }
-      this._brokenLabel.setVisible(true);
-      this._brokenLabel.setText(danger ? 'SECOND WIND \u2014 RISE!' : 'SECOND WIND');
-    } else if (this._brokenLabel) {
+      if (this._brokenLabel && this._brokenLabel.scene) {
+        this._brokenLabel.setVisible(true);
+        this._brokenLabel.setText(danger ? 'SECOND WIND \u2014 RISE!' : 'SECOND WIND');
+      }
+    } else if (this._brokenLabel && this._brokenLabel.scene) {
       this._brokenLabel.setVisible(false);
     }
 
@@ -568,10 +576,12 @@ export class UIScene extends Phaser.Scene {
           stroke: '#0b1a2a', strokeThickness: 4,
         }).setOrigin(0.5).setDepth(101);
       }
-      this._bossLabel.setVisible(true);
-      const name = hud.boss.name || 'BOSS';
-      this._bossLabel.setText(hud.boss.enraged ? (name + '  \u2014  ENRAGED') : name);
-    } else if (this._bossLabel) {
+      if (this._bossLabel && this._bossLabel.scene) {
+        this._bossLabel.setVisible(true);
+        const name = hud.boss.name || 'BOSS';
+        this._bossLabel.setText(hud.boss.enraged ? (name + '  \u2014  ENRAGED') : name);
+      }
+    } else if (this._bossLabel && this._bossLabel.scene) {
       this._bossLabel.setVisible(false);
     }
 

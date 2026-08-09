@@ -169,22 +169,27 @@ export class GameOverScene extends Phaser.Scene {
     this.body.render({ state: 'dead', time: 0, deadT: 0.85 });
 
     // ---- call to action (separated from the body, pulsing) ----
+    // Quick-retry keeps the one-more-go flow alive: R / SPACE / ENTER / tap drops
+    // straight back into a run with the same difficulty / skin / daily (registry
+    // values persist across scene restarts). "T" goes to the title menu to change
+    // settings. (The #9 review complaint was the extra hop through the title.)
     this.inputLocked = true;
     this.time.delayedCall(650, () => { this.inputLocked = false; });
-    this.restartHint = this.add.text(cx, 560, 'PRESS  R  /  TAP  TO  PLAY AGAIN', {
-      fontFamily: 'Arial Black', fontSize: '28px', color: '#ffd23f',
+    this.restartHint = this.add.text(cx, 560, 'PRESS  R  /  TAP  TO  PLAY AGAIN      T  FOR MENU', {
+      fontFamily: 'Arial Black', fontSize: '26px', color: '#ffd23f',
       stroke: '#0b1a2a', strokeThickness: 6,
     }).setOrigin(0.5).setShadow(0, 3, '#000', 8, true, true);
 
     // persistent career line (reference only — tiny, at the very bottom edge)
     this.add.text(cx, CONFIG.HEIGHT - 14,
       'career: ' + stats.totalKills + ' kills  \u00B7  ' + stats.gamesPlayed + ' runs  \u00B7  best wave ' + stats.bestWave + '  \u00B7  hi ' + hs, {
-        fontFamily: 'Arial', fontSize: '14px', color: '#5a7689',
-      }).setOrigin(0.5);
+      fontFamily: 'Arial', fontSize: '14px', color: '#5a7689',
+    }).setOrigin(0.5);
 
     this.input.keyboard.on('keydown-R', () => this.restart());
     this.input.keyboard.on('keydown-SPACE', () => this.restart());
     this.input.keyboard.on('keydown-ENTER', () => this.restart());
+    this.input.keyboard.on('keydown-T', () => this.toTitle());
     this.input.on('pointerdown', () => this.restart());
 
     this.cameras.main.fadeIn(450, 30, 0, 0);
@@ -247,7 +252,17 @@ export class GameOverScene extends Phaser.Scene {
     this.restarting = true;
     this.audio && this.audio.ui();
     this.cameras.main.fadeOut(250);
-    // return to title so the player can change skin/difficulty/daily
+    // QUICK-RETRY: drop straight into a new run with the same difficulty /
+    // skin / daily (registry values persist across scene restarts). This keeps
+    // the one-more-go flow the review asked for; T/toTitle handles menu changes.
+    this.time.delayedCall(250, () => this.scene.start('Game'));
+  }
+
+  toTitle() {
+    if (this.restarting || this.inputLocked) return;
+    this.restarting = true;
+    this.audio && this.audio.ui();
+    this.cameras.main.fadeOut(250);
     this.time.delayedCall(250, () => this.scene.start('Title'));
   }
 

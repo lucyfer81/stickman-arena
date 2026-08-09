@@ -13,6 +13,7 @@ const audio = new AudioManager();
 window.__audio = audio;
 window.__meta = Meta;
 window.__options_module = Options;
+window.__config = CONFIG;
 
 const config = {
   type: Phaser.AUTO,
