@@ -98,6 +98,17 @@ export const CONFIG = {
     // FIRST BLOOD — celebrate the run's first (non-boss) kill
     FIRST_BLOOD_SLOWMO: 0.30,
     FIRST_BLOOD_PAUSE: 0.12,
+    // FIRST-MINUTE v2: first-action score bonuses (one-shot per run, wave-1 only)
+    // so the score climbs from second 1 instead of reading 0 during the most
+    // churn-prone moment. First hit stacks its own +score on top.
+    FIRST_MOVE_SCORE: 5,
+    FIRST_JUMP_SCORE: 5,
+    FIRST_HIT_SCORE: 10,
+    // FIRST-MINUTE v2: guaranteed early heal. The magnet (Round 10) delivers
+    // drops, but RNG can stay cold for a whole wave — mobile/casual still ended
+    // runs at 0 healed. A guaranteed heal on the 3rd wave-1 kill (if HP<max)
+    // engages the health loop within ~30s for everyone.
+    EARLY_HEAL_KILL: 3,              // wave-1 kill count that triggers the guarantee
     // vanguard mini-elite — one early duel, wave 2 first spawn only
     VANGUARD_WAVE: 2,
     // FIRST-TIME ASSIST: wave 1's opening enemy is a "training dummy" — it
@@ -106,7 +117,11 @@ export const CONFIG = {
     // (audit). The truce gives them room to see the J-pointer, land a punch, and
     // earn the FIRST BLOOD celebration — teaching the core loop with a guaranteed
     // early win instead of a confused death.
-    FIRST_ENEMY_PASSIVE_GRACE: 5.0,  // seconds the dummy holds its swing
+    // FIRST-MINUTE v2: the truce is now a SCENE-level gate (WAVE1_TRUCE_TIME) —
+    // EVERY wave-1 enemy spawns passive while it's active, so the 2nd/3rd adds
+    // can't swarm a frozen player before the lesson lands. Clears on first hit.
+    FIRST_ENEMY_PASSIVE_GRACE: 5.0,  // per-enemy fallback self-expire (post-truce)
+    WAVE1_TRUCE_TIME: 12.0,          // global wave-1 salvation window (AFK-safe)
     // DEAD TIME: wave-4+ enemies spawn at the walls and walk ~560px to mid (~3.8s
     // of nothing-to-do). A short "sprint-in" entrance closes that gap fast so the
     // action stays dense past the early game, while preserving the "pressure from
@@ -125,6 +140,13 @@ export const CONFIG = {
   // earned meter, so it's a decision AND a story on every run.
   BURST: {
     METER_MAX: 100,
+    // FIRST-MINUTE v2: seed the meter part-charged and grant a first-blood bonus
+    // so the flagship player-chosen climax lands inside the 60s window for
+    // casuals/mobile (was ~25-35s to charge from 0 — invisible to the at-risk
+    // segment). Seed + first-blood ≈ a ready Overdrive ~15-20s in for anyone who
+    // lands a hit. Hardcore still charges fastest; this just lifts the floor.
+    START_METER: 35,
+    FIRST_BLOOD_BONUS: 15,
     ON_HIT: 5,        // meter gained per landed player attack
     ON_KILL: 12,      // meter gained per kill
     ON_HURT: 9,       // meter gained when the player takes a hit (comeback feel)

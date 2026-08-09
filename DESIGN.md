@@ -455,3 +455,95 @@ into meta unlocks ("N enemies caught in one burst" badge) or a unique execution
 animation on the release.
 
 
+
+## Round 12 — First-minute retention: onboarding / reward pacing / progression
+
+Mandate: **assume players only play for 60 seconds**. Analyze the first-minute
+experience, identify stay/leave reasons, and improve onboarding, reward pacing,
+and progression. Retention only — no combat tuning, no new enemies, no mobile
+rework (Round 10 shipped hold-to-repeat; deeper fix is out of first-minute scope).
+
+### First-minute analysis (Round 10/11 telemetry + source read)
+**Why players STAY (60s):** FIRST BLOOD at ~3-5s (first dopamine peak) · juicy
+combo tiers · visible score climb · goal chip · Overdrive meter anticipation ·
+the wave-5 boss promise.
+**Why players LEAVE in 60s:**
+1. **CRITICAL — first-timer bleeds out in wave 1 (D1 churn).** The training
+   dummy only protected the FIRST wave-1 enemy; the 2nd/3rd attacked normally
+   and swarmed a frozen player. AFK persona: 0 kills, 0 score, 55 HP @ 30s.
+2. **Overdrive unreachable for casuals/mobile in 60s** (~25-35s to charge).
+3. **Score is 0 for the opening 3-5s** — worst moment to look stuck.
+4. **Health loop broken for mobile** (0 healed; magnet needs kills).
+5. **Game Over shames wave-1 deaths** ("YOU REACHED WAVE 1", no forward guidance).
+
+### What shipped — three pillars (retention only)
+
+**A. Onboarding (fix the first 30s)**
+- **A1 Wave-1 full truce.** The passive flag is now a SCENE-level gate (was
+  per-enemy): while active, EVERY wave-1 enemy spawns passive. A frozen player
+  cannot be swarmed. Clears on the player's first landed hit OR a 12s global
+  timer — whichever comes first. `WAVE1_TRUCE_TIME: 12.0`. Per-enemy 5s
+  self-expire is now a fallback that only fires post-truce.
+- **A2 Title J-tag.** A glowing "J" floats next to the demo stickman every time
+  it punches, pinning the keybinding to the action (the bottom controls line is
+  ~400px away and easy to miss).
+
+**B. Reward pacing (fix the dopamine curve)**
+- **B1 Seed Overdrive meter.** Start at 35/100 + first-blood bonus +15. The
+  flagship player-chosen climax now lands in ~15-20s for everyone who lands a
+  hit — casuals/mobile included (was ~30s+).
+- **B2 First-action score.** +5 first move, +5 first jump, +10 first hit. The
+  number climbs from second 1, never reads 0 during the most churn-prone moment.
+- **B3 Guaranteed early heal.** 3rd wave-1 kill drops a heal if HP<max. Engages
+  the health loop within ~30s even if RNG was cold. Magnet (Round 10) delivers.
+
+**C. Progression (fix the "why come back")**
+- **C1 ROOKIE skin — first-wave-clear unlock.** A new cosmetic earned by clearing
+  wave 1 (bestWave >= 2, derived from existing stat — no new tracking). First in
+  `nextUnlock` order so fresh accounts see a near-term goal ("clear wave 1 · 0/1")
+  instead of "reach wave 5". Bootstraps the meta loop within a single short
+  session. New `waveclear` unlock type.
+- **C2 Game-over tip for early deaths.** Wave 1/2 deaths show a one-line hint
+  ("hold J to chain punches — the first hit is free") so run #2 is better.
+
+### Verification — 4-persona telemetry (NORMAL, same scripts as Round 10)
+
+| Persona | Metric | Round 10 | Round 12 | Δ |
+|---|---|---|---|---|
+| First-time (AFK 30s) | End HP | 55 | **91** | +36 (D1 churn fix) |
+| First-time (AFK 30s) | Hits taken | 5 | **1** | -4 |
+| Casual (60s) | Score | 4190 | **7870** | +88% |
+| Casual (60s) | Best combo | 10 | **35** | +25 |
+| Casual (60s) | Overdrive ready | no | **yes** | flagship reachable |
+| Hardcore (90s) | Wave | 4 | **5 (boss!)** | +1 |
+| Hardcore (90s) | Best combo | 30 | **47** | +17 |
+| Mobile (45s) | End HP | 53 | **73** | +20 |
+| Mobile (45s) | Overdrive ready | no | **yes** | flagship reachable |
+
+The AFK persona now sits at 100 HP for the first ~27s (was bleeding from the
+first contact). Casuals/mobile reach Overdrive every run. Score climbs from
+second 1. Hardcore reaches the wave-5 boss inside 90s.
+
+### Test suite — 109/109 green, zero regressions
+- Official CI **5/5** (desktop ×3, mobile-landscape, mobile-portrait).
+- New `tests/firstminute.spec.js` **11/11** — wave-1 truce (all passive / first-
+  hit-ends-truce / AFK 12s zero damage), title J-tag, overdrive seed + first-
+  blood bonus, first-action score (move/jump), 3rd-kill heal, ROOKIE unlock,
+  game-over tip.
+- Updated: `onboarding-assist` test 3 (per-enemy grace → scene truce gate),
+  `retention` Meta test (ember → rookie first), `burst` tests 1-3 (isolate v2
+  seed + first-blood to test the +5/+12/+9 deltas).
+- All other dev suites green: assist 4, retention 5, meta 2, burst 8 (incl 75s
+  real-play), onboard/combo/bridge/magnet/swarm 26, depth 3, laststand 4, qa 7,
+  variety 14 (incl bossvariety 4), playthrough 4, difficulty, sprint 3, autofire
+  2, music 4, volume, eval, boss 3 (incl 75s real-play), evalburst.
+
+### Honest caveats
+- An AFK player (never presses J) can only be *delayed* from dying — the 12s
+  truce gives them room to read the screen and try. The target is the far larger
+  group who *will* try J but need a moment.
+- B3 (guaranteed heal) didn't fire in this run's casual/mobile telemetry (they
+  left wave 1 before the 3rd kill) — it's a safety net; the primary heal loop
+  (magnet + drop chance) still works, and the casual was at healthy HP anyway.
+- Retention is measured via structural/mechanical proxies + Playwright telemetry,
+  not human feel.

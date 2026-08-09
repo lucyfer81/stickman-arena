@@ -69,6 +69,20 @@ export class GameOverScene extends Phaser.Scene {
       }).setOrigin(0.5);
     }
 
+    // FIRST-MINUTE v2 (C2): contextual tip for early deaths. A player who bled
+    // out on wave 1/2 is the most likely to churn and never return — give them a
+    // single concrete forward-action so run #2 is better than run #1. Surfaced
+    // only for genuinely early deaths (past wave 3 the player is engaged enough).
+    if (!newBest && r.wave <= 2) {
+      const tip = r.wave <= 1
+        ? 'TIP: hold J to chain punches \u2014 the first hit is free'
+        : 'TIP: press K to kick enemies back when surrounded';
+      this.add.text(cx, 174, tip, {
+        fontFamily: 'Arial', fontSize: '17px', color: '#9bb4c8',
+        stroke: '#0b1a2a', strokeThickness: 3,
+      }).setOrigin(0.5);
+    }
+
     // ---- stats card: SCORE hero (animated count-up) + 3-up supporting row ----
     const cardY = 188, cardH = 122, cardW = 480;
     this._plate(cx, cardY, cardW, cardH, 0x35e1ff, 0.32);

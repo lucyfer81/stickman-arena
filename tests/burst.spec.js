@@ -44,6 +44,11 @@ test.describe('OVERDRIVE burst meter', () => {
     const errors = collectErrors(page);
     await startGame(page);
     await page.evaluate(() => window.__test.clearEnemies());
+    // isolate the +5/hit delta from the v2 seed (START_METER) + first-blood bonus
+    await page.evaluate(() => {
+      const s = window.__game.scene.getScene('Game');
+      s.player.burst = 0; s.firstBloodDone = true;
+    });
     const hp0 = await page.evaluate(() => window.__test.spawnDummy(60, true));
     expect(hp0).toBeGreaterThan(0);
     await waitTele(page, (t) => t.enemiesAlive === 1);
@@ -64,6 +69,11 @@ test.describe('OVERDRIVE burst meter', () => {
     const errors = collectErrors(page);
     await startGame(page);
     await page.evaluate(() => window.__test.clearEnemies());
+    // isolate the +17 hit+kill delta from the v2 seed + first-blood bonus
+    await page.evaluate(() => {
+      const s = window.__game.scene.getScene('Game');
+      s.player.burst = 0; s.firstBloodDone = true;
+    });
     await page.evaluate(() => window.__test.spawnDummy(60, true));
     await waitTele(page, (t) => t.enemiesAlive === 1);
     expect((await telemetry(page)).burst).toBe(0);
@@ -81,6 +91,11 @@ test.describe('OVERDRIVE burst meter', () => {
     const errors = collectErrors(page);
     await startGame(page);
     await page.evaluate(() => window.__test.clearEnemies());
+    // isolate the +9/hurt delta from the v2 seed
+    await page.evaluate(() => {
+      const s = window.__game.scene.getScene('Game');
+      s.player.burst = 0;
+    });
     // an aggressive dummy close enough to swing on the player
     await page.evaluate(() => window.__test.spawnDummy(70, false));
     await waitTele(page, (t) => t.enemiesAlive === 1);

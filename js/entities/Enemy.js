@@ -367,9 +367,15 @@ export class Enemy extends Stickman {
     // FIRST-TIME ASSIST: the training dummy's truce is a fixed window from spawn
     // (not from first reaching the player), so a slow approach can't extend the
     // safe time indefinitely. Tick + expire it here, before the melee decision.
+    // FIRST-MINUTE v2: the per-enemy self-expire is now a FALLBACK that only fires
+    // once the scene-level wave-1 truce has ended — so the global 12s salvation
+    // window holds for every wave-1 enemy, not just the first 5s of each. The
+    // scene gate (_endWave1Truce) is the authoritative clearer on first hit.
     if (this.passive) {
       this.passiveT += dt;
-      if (this.passiveT > CONFIG.RETENTION.FIRST_ENEMY_PASSIVE_GRACE) this.passive = false;
+      if (!this.scene.wave1Truce && this.passiveT > CONFIG.RETENTION.FIRST_ENEMY_PASSIVE_GRACE) {
+        this.passive = false;
+      }
     }
 
     const reach = this.v.attackReach;

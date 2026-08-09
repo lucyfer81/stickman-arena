@@ -95,25 +95,26 @@ test.describe('First-time assist (training dummy)', () => {
       s.spawnQueue = 0;
     });
 
-    // Expiry is deterministic: fast-forward the dummy's truce timer to the
-    // threshold (the headless rAF clock runs the game at ~1/3 wall-time, so we
-    // drive the timer directly instead of waiting ~15s of wall-time). The next
-    // update tick must then clear passive — the dummy fights back.
+    // FIRST-MINUTE v2: the truce is now a SCENE-level gate (WAVE1_TRUCE_TIME),
+    // not the per-enemy 5s timer. The per-enemy self-expire only fires once the
+    // scene truce ends. So we drive the scene timer to its threshold — the next
+    // update tick must end the truce and clear passive on every wave-1 enemy.
     await page.evaluate(() => {
       const s = window.__game.scene.getScene('Game');
-      s.enemies[0].passiveT = 5.0; // FIRST_ENEMY_PASSIVE_GRACE threshold
+      s.wave1TruceT = 12.0; // WAVE1_TRUCE_TIME threshold
     });
     let after = null;
     const deadline = Date.now() + 3000;
     while (Date.now() < deadline) {
       after = await page.evaluate(() => {
         const s = window.__game.scene.getScene('Game');
-        return { passive: s.enemies[0] ? s.enemies[0].passive : null };
+        return { passive: s.enemies[0] ? s.enemies[0].passive : null, truce: s.wave1Truce };
       });
       if (after.passive === false) break;
       await page.waitForTimeout(120);
     }
     expect(after.passive).toBe(false);
+    expect(after.truce).toBe(false);
     expect(errors).toEqual([]);
   });
 

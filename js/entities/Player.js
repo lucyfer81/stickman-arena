@@ -30,7 +30,11 @@ export class Player extends Stickman {
     this.secondWindUsed = false;
     // OVERDRIVE: a player-built super meter. The scene adds to it on hits/kills/
     // taking damage, and consumes it when the player unleashes (GameScene._burst).
-    this.burst = 0;
+    // FIRST-MINUTE v2 (B1): start part-charged so the flagship player-chosen
+    // climax lands inside the 60s window for casuals/mobile — was ~25-35s to
+    // charge from 0, invisible to the at-risk segment. Seed + first-blood bonus
+    // ≈ a ready Overdrive ~15-20s in for anyone who lands a hit.
+    this.burst = CONFIG.BURST.START_METER || 0;
     this.burstMax = CONFIG.BURST.METER_MAX;
   }
 
