@@ -570,3 +570,42 @@ Top10与修复顺序详见 DESIGN.md Round 10。本轮先修 #1 资源循环（�
 #7/#8随#1/#2解决 + #9/#10评估不改(已由既有实现或累积修复缓解)。
 新增测试：magnet3/assist4/autofire2/sprint3/bridge2/swarm3 共17项，全绿。
 最终persona：休闲 18血0治连击9 → 满血50治连击10；硬核分6765→11660、连击19→30。
+
+## Round 11 — 趣味导向：OVERDRIVE 主动大招（玩家自造高潮）
+
+以独立游戏设计师视角，游戏已稳定且内容丰富（10轮迭代）。做了一次纯趣味审计：
+
+- **兴奋时刻**：Boss击杀、Second Wind重塑、连击里程碑、FIRST BLOOD、炸弹/陨石混乱。
+- **无聊时刻**：反应性高潮（Boss/Second Wind）之间的"自动朝向 + J/K"循环——全程没有任何玩家**主动发起**的高潮。
+- **流失点**：见过两个Boss（~wave10）后；高潮之间的平坦段没有拉力。
+- **故事性**：Second Wind是旗舰（"差点死然后反杀"），但玩家从未能**选择**一个"我现在就是危险本身"的瞬间。
+
+**结构性缺口**：每个伟大格斗游戏都给玩家一个自造、自选的能量爆发（SoR星技 / 无双乱舞 / 魔人化 / Hades召唤）。Stickman Arena 没有。Rage 拾取是被动 RNG 增伤，不是主动按钮——这是最大的趣味杠杆。
+
+**三个候选**：① OVERDRIVE 大招槽（玩家自造的主动超必杀）② 临时武器拾取 ③ 空中连段系统。选 ① ——填补结构性缺口，玩家**选择**高潮，最高杠杆、最低风险，复用全部既有 juice 原语。
+
+### 改动
+- `config.js`：新增 `BURST` 调参块（满值100 / 命中+5 / 击杀+12 / 挨打+9 / 蓄力0.22s / 释放0.30s / 半径520 / 普敌45伤 / Boss固定50 / 击退760 / 无敌0.75s / 每击杀加分60 / 键位 L）。
+- `Player.js`：`burst` / `burstMax` 状态。
+- `GameScene.js`：
+  - `_tryBurst()` —— 满槽才放；**可在 hurt 状态下释放**（panic-button / 连段破局——被锁挨打正是想放大招的时候，更爽）；消耗整槽；蓄力起即无敌。
+  - `_releaseBurst()` —— 径向波：范围内肉搏敌 45伤+大击退（小怪直接死）、Boss 固定 50（切一块，绝不一击必杀）、**蒸发范围内敌方投掷物**、**吹灭范围内地面火**；反馈峰值仅次于 Boss 击杀（BOSS_KILL级缩放+环+双色粒子+0.4s慢镜+重屏震+"OVERDRIVE!"横幅+每击杀浮字）。
+  - `_updateBurst(dt)` —— windup→release 状态机 + 扩展波绘制（独立 `burstLayer` depth22，不与冲击波层冲突）。
+  - 槽位积累：`_onPlayerHit` 命中+5/击杀+12、`_onPlayerHurt` 挨打+9；**蓄力期 `_addBurst` no-op**（大招不给自己刷槽）。
+  - 键盘 L + 控制 `c.burstPressed`；遥测/HUD 加 burst/burstMax/burstReady/bursting/bursts；`__test` 钩子 fillBurst/setBurst/burst/playerX。
+- `UIScene.js`：HP 下方金色 OVERDRIVE 槽条（满时脉冲发光 + "PRESS L"/"TAP" 提示）+ 触屏专属 BURST 按钮（右上，仅满时发光放大可点）。
+
+### 验证
+- 新增 `tests/burst.spec.js` **7/7**：命中+5 / 击杀+17(命中+击杀) / 挨打+9 / 未满不放 / 清场三人 / Boss固定50(±2) / 清投掷物+灭火。注册 `burst` project。
+- 官方 CI **5/5**（桌面×3 + 移动横/竖）；boss3/depth3/laststand4（10/10）；**variety14/14**（投掷物/火区/事件/盾/爆/射全过——验证 `_releaseBurst` 不破坏既有层）；retention5/bossvariety4 全绿。共 60+ 项零失败。
+- 新增 `tests/eval-burst.spec.js`（`evalburst` project）：75s 真人对局，激进 persona 槽满即放大招。结果：**3 次 OVERDRIVE**、到 **wave 5 Boss**（DESIGN Round10 硬核 90s 仅到 wave4）、14杀/连击23/终血79/治疗25/3次挨打、**零报错**。证明大招在对局里自然触发、制造玩家自选的高潮。
+
+### 趣味评估（结构/机制代理指标 + 真人对局遥测）
+| 维度 | 改前 | 改后 |
+|---|---|---|
+| 玩家自选高潮 | 零（全是反应性） | ~每25s一个（75s放3次） |
+| 旗舰内容可达 | 硬核90s到wave4 | 75s到wave5 Boss |
+| 决策 | 无（踢spam最优） | "何时放大招"=每局多次决策 |
+| 故事性 | "打到wave N" | "6个围上来，我引爆清场" |
+| 反击/逃生 | 仅Second Wind(0血) | Overdrive panic-button（满槽即可） |
+诚实保留：仍是代理指标+遥测，非真人手感；Boss固定50确保大招跳不过Boss战（设计意图）。下轮候选：把 Overdrive 触发数/最大连击引爆数接入 Meta 解锁（"曾一次引爆N敌"徽章），或给放大招加一段专属处决动画。

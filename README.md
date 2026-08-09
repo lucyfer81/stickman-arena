@@ -10,10 +10,11 @@ Fight endless waves of stickman enemies, build combos, grab health drops, and ch
 - **Jump:** `W` / `Space` (short hop if tapped, full jump if held — with coyote-time + jump-buffering)
 - **Punch:** `J` (fast, light)
 - **Kick:** `K` (slow, heavy, big knockback)
+- **Overdrive:** `L` (when the gold meter under your HP is full — unleash a radial burst that clears crowds, vaporizes projectiles, and chunks bosses)
 - **Pause:** `Esc`
-- **Mobile:** on-screen **virtual joystick** (bottom-left) + **Jump / Punch / Kick** buttons (bottom-right). Landscape recommended.
+- **Mobile:** on-screen **virtual joystick** (bottom-left) + **Jump / Punch / Kick / Burst** buttons (bottom-right). Landscape recommended.
 
-Attacks auto-face the nearest enemy. Chain hits within the combo window to multiply your score.
+Attacks auto-face the nearest enemy. Chain hits within the combo window to multiply your score. Fight to fill the Overdrive meter, then spend it on a clutch screen-clear.
 
 ## Run locally
 

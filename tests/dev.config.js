@@ -29,6 +29,7 @@ module.exports = defineConfig({
   use: { baseURL: 'http://localhost:8080' },
   projects: [
     project('boss',        /boss\.spec\.js/,        120000),
+    project('burst',       /burst\.spec\.js/,        90000),
     project('bossvariety', /bossvariety\.spec\.js/, 120000),
     project('depth',       /depth\.spec\.js/,        90000),
     project('combo',       /combo\.spec\.js/,          90000),
@@ -36,6 +37,7 @@ module.exports = defineConfig({
     project('diag',        /diagnostic\.spec\.js/,  300000),
     project('difficulty',  /difficulty\.spec\.js/,   90000),
     project('eval',        /eval-secondwind\.spec\.js/, 90000),
+    project('evalburst',   /eval-burst\.spec\.js/,    120000),
     project('laststand',   /laststand\.spec\.js/,    90000),
     project('magnet',      /magnet\.spec\.js/,        60000),
     project('meta',        /meta\.spec\.js/,         60000),

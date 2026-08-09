@@ -21,6 +21,7 @@ export class GameScene extends Phaser.Scene {
     this.fxLayer = this.add.graphics().setDepth(20); // hit sparks drawn direct
     this.ringLayer = this.add.graphics().setDepth(21); // expanding impact rings
     this.shockLayer = this.add.graphics().setDepth(19); // boss ground-slam shockwaves
+    this.burstLayer = this.add.graphics().setDepth(22); // OVERDRIVE radial wave (above rings)
     this.debrisLayer = this.add.graphics().setDepth(9); // SECOND WIND shattered-limb props
     this.veilLayer = this.add.graphics().setDepth(220); // SECOND WIND monochrome/red vignette
     this.fireLayer = this.add.graphics().setDepth(18); // ground fire (bomber/meteor)
@@ -63,6 +64,11 @@ export class GameScene extends Phaser.Scene {
     this.rageMax = 1;
     this.activeEvent = null;     // event key for the current wave (null = plain wave)
     this._resetEventFlags();
+    // OVERDRIVE burst state machine: null = idle; { phase: 'windup'|'release', t }
+    // while active the player is invulnerable and the radial wave is resolving.
+    this.bursting = null;
+    this.burstWave = 0;          // current expanding-wave radius (for draw + AoE)
+    this.bursts = 0;             // count of Overdrives unleashed this run (telemetry)
 
     // difficulty preset (chosen on the title screen; persists)
     const diffKey = this.registry.get('difficulty') || 'normal';
@@ -98,6 +104,7 @@ export class GameScene extends Phaser.Scene {
     this.controls = {
       dir: 0, jumpPressed: false, jumpHeld: false,
       punchPressed: false, kickPressed: false,
+      burstPressed: false,
       touchActive: false, touchDir: 0, jumpHeldTouch: false,
     };
     this._setupKeyboard();
@@ -193,6 +200,11 @@ export class GameScene extends Phaser.Scene {
         enterSecondWind: () => { if (!this.player.broken && !this.player.dead) { this.player._enterBroken(); return true; } return false; },
         reform: () => { if (this.player.broken) { this._reform(); return true; } return false; },
         fastForwardBroken: (t) => { if (this.player.broken) this.player.brokenT = (t != null ? t : 0.2); },
+        // OVERDRIVE: fill / set the meter and fire the burst for deterministic tests.
+        fillBurst: () => { this.player.burst = this.player.burstMax; return this.player.burst; },
+        setBurst: (n) => { this.player.burst = clamp(n || 0, 0, this.player.burstMax); return this.player.burst; },
+        burst: () => this._tryBurst(),
+        playerX: () => this.player.x,
         playerState: () => ({
           state: this.player.state,
           attackType: this.player.attack ? this.player.attack.type : null,
@@ -227,6 +239,7 @@ export class GameScene extends Phaser.Scene {
       jump: k.addKey('SPACE'),
       punch: k.addKey('J'),
       kick: k.addKey('K'),
+      burst: k.addKey(CONFIG.BURST.KEY),
     };
     const resume = () => this.audio && this.audio.resume();
     this.keys.jump.on('down', () => { resume(); c.jumpPressed = true; });
@@ -234,6 +247,7 @@ export class GameScene extends Phaser.Scene {
     this.keys.up2.on('down', () => { resume(); c.jumpPressed = true; });
     this.keys.punch.on('down', () => { resume(); c.punchPressed = true; });
     this.keys.kick.on('down', () => { resume(); c.kickPressed = true; });
+    this.keys.burst.on('down', () => { resume(); c.burstPressed = true; });
     k.on('keydown-ESC', () => this._togglePause());
   }
 
@@ -793,6 +807,120 @@ export class GameScene extends Phaser.Scene {
     this.audio && this.audio.combo(12);
   }
 
+  // ---- OVERDRIVE burst meter (player-built active super) ----
+  // Earned through fighting: hits, kills, and taking damage. Capped at METER_MAX.
+  // Suppressed while a burst is resolving so the climax doesn't farm its own meter.
+  _addBurst(n) {
+    if (this.bursting) return;
+    if (this.player.burst >= this.player.burstMax) return;
+    this.player.burst = Math.min(this.player.burstMax, this.player.burst + n);
+  }
+
+  // Consume a full meter to unleash the radial OVERDRIVE wave. The state machine
+  // (_updateBurst) drives the windup -> release; _releaseBurst does the AoE.
+  // Usable even from the 'hurt' state: Overdrive is a panic-button / combo-breaker
+  // — the moment you're stun-locked is exactly when you want to pop it.
+  _tryBurst() {
+    const p = this.player;
+    if (this.bursting || p.dead) return;
+    if (p.burst < p.burstMax) return;
+    const B = CONFIG.BURST;
+    p.burst = 0;
+    this.bursting = { phase: 'windup', t: 0 };
+    this.burstWave = 0;
+    this.bursts++;
+    // invulnerable through windup + release tail so the climax isn't interrupted
+    p.invuln = Math.max(p.invuln, B.INVULN);
+    // charging feedback: gold ring + small zoom + slow-mo sell the wind-up
+    this.slowmo = Math.max(this.slowmo, B.WINDUP);
+    this._impactRing(p.x, p.y - 70, 0xffd23f, { life: 0.30, maxR: 90, width: 5 });
+    this._punchZoom(CONFIG.FEEL.ZOOM.HURT, 0, 0);
+    this.cameras.main.shake(120, 0.012);
+    this.audio && this.audio.combo && this.audio.combo(18);
+  }
+
+  // The radial wave resolves: damage all enemies in radius, vaporize enemy
+  // projectiles, blow out ground fire. Big feedback peak just under boss-kill.
+  _releaseBurst() {
+    const B = CONFIG.BURST;
+    const p = this.player;
+    const F = CONFIG.FEEL;
+    let hits = 0;
+    for (const e of this.enemies) {
+      if (e.dead) continue;
+      if (Math.abs(e.x - p.x) > B.RADIUS) continue;
+      hits++;
+      const dmg = e.isBoss ? B.BOSS_DAMAGE : B.DAMAGE;
+      const killed = e.health - dmg <= 0;
+      e.takeHit(dmg, p.x, B.KNOCKBACK * (e.isBoss ? 0.4 : 1), 0.10);
+      if (killed) this._onPlayerHit(e, { dmg, kb: B.KNOCKBACK, pause: 0.10, from: p.x }, true);
+      this.burst(e.x, e.y - 70 * e.scale, 0xffd23f, e.isBoss ? 30 : 16);
+    }
+    // vaporize enemy projectiles in radius (ranger/caster shots) — power fantasy
+    for (const pr of this.projectiles) {
+      if (!pr.dead && Math.abs(pr.x - p.x) < B.RADIUS) {
+        pr.dead = true;
+        this.burst(pr.x, pr.y, 0xffe26b, 8);
+      }
+    }
+    // blow out ground fire in radius
+    for (const hz of this.hazards) {
+      if (!hz.dead && Math.abs(hz.x - p.x) < B.RADIUS) hz.dead = true;
+    }
+    // feedback peak: biggest ring (dual) + max zoom + dual particle storm +
+    // slow-mo + heavy shake. The player-CHOSEN climax.
+    this._impactRing(p.x, p.y - 70, 0xffd23f, this._ringSpec('BOSS_KILL'));
+    this._impactRing(p.x, p.y - 70, 0xffffff, this._ringSpec('KILL'));
+    this._punchZoom(F.ZOOM.BOSS_KILL, 0, F.SHOVE.DOWN);
+    this.slowmo = Math.max(this.slowmo, 0.40);
+    this.hitPause = Math.max(this.hitPause, 0.12);
+    this.cameras.main.shake(300, 0.024);
+    this.burst(p.x, p.y - 70, 0xffd23f, 56);
+    this.burst(p.x, p.y - 70, 0xffffff, 30);
+    this.dustBurst(p.x, CONFIG.GROUND_Y, 26);
+    const bonus = Math.round(B.SCORE_PER_HIT * hits * this._scoreMul());
+    this.score += bonus;
+    this.ui.banner('OVERDRIVE!', '#ffd23f');
+    this.ui.floatText(hits + ' HIT' + (hits === 1 ? '' : 'S') + '  +' + bonus,
+      p.x, p.y - 200, '#ffd23f', 30);
+    this.audio && this.audio.bigHit && this.audio.bigHit();
+  }
+
+  // drive the windup -> release state machine + draw the expanding wave.
+  _updateBurst(dt) {
+    const g = this.burstLayer;
+    g.clear();
+    if (!this.bursting) return;
+    const B = CONFIG.BURST;
+    const p = this.player;
+    this.bursting.t += dt;
+    if (this.bursting.phase === 'windup') {
+      // a tightening gold charge ring around the player during windup
+      const a = clamp01(this.bursting.t / B.WINDUP);
+      g.lineStyle(4, 0xffd23f, 0.6 * (1 - a * 0.5));
+      g.strokeCircle(p.x, p.y - 60, 60 + 50 * a);
+      g.fillStyle(0xffd23f, 0.05 * a);
+      g.fillCircle(p.x, p.y - 60, 70);
+      if (this.bursting.t >= B.WINDUP) {
+        this.bursting.phase = 'release';
+        this.bursting.t = 0;
+        this._releaseBurst();
+      }
+    } else if (this.bursting.phase === 'release') {
+      // the expanding radial wave
+      const a = clamp01(this.bursting.t / B.RELEASE_TIME);
+      this.burstWave = B.RADIUS * (1 - Math.pow(1 - a, 3));
+      const fade = 1 - a;
+      g.lineStyle(8, 0xffd23f, 0.9 * fade);
+      g.strokeCircle(p.x, p.y - 60, this.burstWave);
+      g.lineStyle(4, 0xffffff, 0.7 * fade);
+      g.strokeCircle(p.x, p.y - 60, this.burstWave * 0.86);
+      g.fillStyle(0xffd23f, 0.07 * fade);
+      g.fillCircle(p.x, p.y - 60, this.burstWave);
+      if (this.bursting.t >= B.RELEASE_TIME) this.bursting = null;
+    }
+  }
+
   // combined score multiplier: difficulty/daily * rage buff
   _scoreMul() {
     const base = (this.mods && this.mods.scoreMul) || 1;
@@ -994,6 +1122,8 @@ export class GameScene extends Phaser.Scene {
     this.combo++;
     this.bestCombo = Math.max(this.bestCombo, this.combo);
     this.comboTimer = CONFIG.COMBO_WINDOW;
+    // OVERDRIVE: every landed hit earns meter (kill adds more, below).
+    this._addBurst(CONFIG.BURST.ON_HIT);
     // RETENTION: first time the player damages an enemy — drives the teaching
     // callouts (hide the pre-contact pointer once they've actually landed a hit).
     if (!this.onboard.firstHit) this.onboard.firstHit = true;
@@ -1024,6 +1154,8 @@ export class GameScene extends Phaser.Scene {
     this._checkComboTier();
     if (killed) {
       this.kills++;
+      // OVERDRIVE: a kill earns more meter than a plain hit.
+      this._addBurst(CONFIG.BURST.ON_KILL);
       // COMBO BRIDGE: a kill extends the combo window so the chain survives the
       // gap to the next enemy. Without this, casuals stall just below the x10
       // milestone — the window can't bridge a dead enemy to the next walk-up.
@@ -1104,6 +1236,9 @@ export class GameScene extends Phaser.Scene {
     this.combo = 0;
     this.comboTimer = 0;
     this.hitsTaken++;
+    // OVERDRIVE: taking a hit earns meter (comeback feel — getting punished still
+    // advances your counter-attack option).
+    this._addBurst(CONFIG.BURST.ON_HURT);
     this.hitPause = Math.max(this.hitPause, 0.08);
     // a hit on the player is the other key feedback peak — zoom punch + red ring
     // + a shake with real bite so getting hurt actually hurts.
@@ -1208,6 +1343,8 @@ export class GameScene extends Phaser.Scene {
     if (c.punchPressed) { p_tryAttack(this, 'punch'); c.punchPressed = false; ob.punch = true; }
     if (c.kickPressed) { p_tryAttack(this, 'kick'); c.kickPressed = false; ob.kick = true; }
     if (c.jumpPressed) ob.jump = true;
+    // OVERDRIVE: a full meter + L (or the touch BURST button) unleashes the wave.
+    if (c.burstPressed) { this._tryBurst(); c.burstPressed = false; }
 
     // slow-motion right after a kill
     let stepDt = dt;
@@ -1316,6 +1453,7 @@ export class GameScene extends Phaser.Scene {
     this._updateHazards(stepDt);
     this._updateProjectiles(stepDt);
     this._updateMeteors(stepDt);
+    this._updateBurst(dt);   // real-time: the wave animates at full speed regardless of slow-mo
     this._updateDebris(dt);   // real-time: the shatter prop fades regardless of slow-mo
     this._updateVeil(dt);
 
@@ -1378,6 +1516,7 @@ export class GameScene extends Phaser.Scene {
       boss: bossAlive ? { hp: this.boss.health, maxHp: this.boss.maxHealth, enraged: this.boss.enraged, kind: this.boss.bossKind, name: CONFIG.BOSS.NAME[this.boss.bossKind] } : null,
       rage: Math.max(0, this.rageT), rageMax: this.rageMax,
       event: this.activeEvent,
+      burst: this.player.burst, burstMax: this.player.burstMax, burstReady: this.player.burst >= this.player.burstMax && !this.bursting,
       broken: this.player.broken, brokenT: this.player.brokenT, brokenMax: this.player.brokenMax,
     });
     if (typeof window !== 'undefined') {
@@ -1418,6 +1557,12 @@ export class GameScene extends Phaser.Scene {
         brokenMax: this.player.brokenMax,
         secondWindUsed: this.player.secondWindUsed,
         reformed: !this.player.broken && this.player.secondWindUsed,
+        // OVERDRIVE telemetry
+        burst: this.player.burst,
+        burstMax: this.player.burstMax,
+        burstReady: this.player.burst >= this.player.burstMax && !this.bursting,
+        bursting: !!this.bursting,
+        bursts: this.bursts,
         // generative-soundtrack state (observable for tests / debug)
         music: this.audio && this.audio.getMusicState ? this.audio.getMusicState() : null,
       };
