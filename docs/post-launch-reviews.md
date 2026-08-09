@@ -364,3 +364,318 @@ branch, and `isBoss` was gated to the single `'boss'` variant.
   was fixed by defaulting off-context spawns to the slammer while real boss
   waves alternate.
 
+---
+
+# Round 3 — post-Round-15 reviews (current, feature-rich state)
+
+Many updates later the game is deep: a generative soundtrack, two bosses, 12
+enemy archetypes, 12 rare events, ground zones (fire/ice/shrine), a pickup
+magnet, Second Wind, an OVERDRIVE super, a MERCY surrender mechanic, difficulty
+select, daily challenge, 6 skins, mobile hold-to-repeat, and two feel passes.
+A fresh wave of 40 reviews comes in. Content complaints have largely faded; the
+distribution has migrated to the **plumbing/accessibility** complaints that were
+raised in every prior round and never addressed.
+
+## 20 Positive Reviews (Round 3)
+
+**P1.** "Okay the MERCY thing is genuinely the coolest thing in a free game this
+year. Last enemy drops to his knees and raises his hands and I just... stood
+there. Then I spared him and he BOWED and walked off. I felt things. In a
+stickman game. What." *(mercy, surprise)*
+
+**P2.** "OVERDRIVE is the missing button. Building the meter, waiting for the
+perfect moment when six guys surround me, then BOOM — screen clears, fire goes
+out, slow-mo. Every run I get to choose my own climax now." *(overdrive)*
+
+**P3.** "The music actually slaps during the boss wave and then it chills back
+out. Didn't expect a generative soundtrack to land this hard. Big turnaround
+from launch." *(music)*
+
+**P4.** "Two bosses with completely different rulesets is huge. Slammer = read
+the jump, Oracle = dodge the spread. Wave 10 hit and I had to actually rethink.
+Keep adding these." *(boss variety)*
+
+**P5.** "The feel is unfair to other indie games. The squash on a kill, the
+fist trail, the camera leaning into the punch — I don't know how this is free
+and runs in a browser." *(juice, feel pass 2)*
+
+**P6.** "Charger is the enemy this game needed. I was turtling and it just
+WOKE me up with a telegraphed charge. Now I actually move. Leaper + charger +
+shielder means I'm never doing the same thing twice." *(enemy variety)*
+
+**P7.** "Second Wind into Overdrive into a boss kill is the best 12 seconds I've
+had in a brawler. Arm falls off, I go feral, pick up a heal, REFORMED, pop the
+burst, boss dies. Chef's kiss." *(second wind, overdrive)*
+
+**P8.** "The medic makes me target-prioritize now. I'll dash past three grunts
+just to kill the medic first because otherwise the pack never dies. Real
+tactics in my stickman game." *(enemy variety, depth)*
+
+**P9.** "Ice patches sliding me around and heal shrines I have to fight to hold
+are such smart little adds. Same arena, totally different movement puzzles each
+wave." *(hazards, variety)*
+
+**P10.** "Daily challenge is my morning coffee game. Today's GLASS (70 HP) run
+forced a completely different playstyle. Separate best keeps me coming back."
+*(daily, retention)*
+
+**P11.** "I spare every surrender now. My friends kill them all. We argue about
+it. A free browser game started a moral argument in my group chat, that's a
+win." *(mercy, social)*
+
+**P12.** "The combo escalation where the camera slowly tightens through a long
+chain — I didn't notice it consciously until I watched a clip back. Top-tier
+game feel craft." *(juice, combo)*
+
+**P13.** "ROOKIE skin for clearing wave 1 is a smart hook — my friend who dies
+at wave 3 every time still got a cosmetic and felt accomplished. Onboarding
+finally clicks." *(meta, onboarding)*
+
+**P14.** "Oracle's enrage summoning leapers to punish my jump-dodging is evil
+genius design. I have to choose: jump the spread and eat a leaper, or tank the
+spread. Real decisions." *(boss design)*
+
+**P15.** "Bomber chain reactions never get old. Lured one into a shielder pack
+and the whole wave imploded. Friendly fire is the fun kind of chaos." *(enemy,
+emergent)*
+
+**P16.** "The game respects your time. Boot, fight, die, restart in under a
+second, no ads, no login, no microtransactions. Just a tight little arcade."
+*(lightweight)*
+
+**P17.** "Mobile hold-to-repeat finally let me keep up on my phone. Thumb rests
+on PUNCH and it chains. Not keyboard parity but it's playable on the toilet
+now." *(mobile)*
+
+**P18.** "METEOR STORM into BOMB SQUAD into BLESSED GROUND back to back — I
+didn't know what was coming each wave and I loved it. The event director is the
+real MVP." *(events, variety)*
+
+**P19.** "Six skins, career stats, daily bests — for a session or two a day this
+is the perfect side game. Unlocks feel earned, not grinded." *(meta)*
+
+**P20.** "The title screen with the spotlight and the two stickmen sparring sold
+me before I even pressed start. Whoever art-directed this knew what they were
+doing." *(art, title)*
+
+---
+
+## 20 Negative Reviews (Round 3)
+
+**N1.** "I CANNOT rebind keys. J and K cramp my hand and I'm on AZERTY so the
+layout is nonsense. There's no options menu at all. In 2026 this is genuinely
+wild for a PC game. Fix this and it's a great game; until then I can't
+recommend it." *[NO REBIND / NO OPTIONS]*
+
+**N2.** "No key remapping. No settings menu. I want my mouse thumb buttons for
+punch/kick and there is literally nothing. The game is good! But I quit
+because my hand hurts." *[NO REBIND / NO OPTIONS]*
+
+**N3.** "Great game trapped behind a fixed control scheme. On my ergo keyboard
+J/K are awkward. Every other brawler lets me remap. Add a settings screen —
+it's PC table stakes." *[NO REBIND / NO OPTIONS]*
+
+**N4.** "please add key rebinding. its the one thing holding it back. i play
+left-handed and J/K is unusable. there isnt even an options button on the
+title. sad because the game is clearly good." *[NO REBIND / NO OPTIONS]*
+
+**N5.** "The screen shake is full-on with no toggle. I lasted 8 minutes before
+feeling nauseous. There HAS to be an accessibility option. My friend couldn't
+play at all. The juice is great but not if it makes people sick." *[SHAKE
+TOGGLE / ACCESSIBILITY]*
+
+**N6.** "Motion sickness warning: the shake + camera zoom on every hit is
+intense. No reduced-motion option in any menu (because there's no menu).
+Accessibility 101." *[SHAKE TOGGLE / NO OPTIONS]*
+
+**N7.** "Mobile: buttons still sit under my palm in landscape and there's no
+haptics so taps feel lost. Hold-to-repeat helped my score but the layout still
+fights my hand. Let me move the buttons." *[MOBILE]*
+
+**N8.** "Second Wind confused me badly the first time. My arm fell off, 1 HP, a
+weird timer — I died in 2 seconds having no idea what I was supposed to do.
+Cool mechanic, zero explanation." *[SECOND WIND ONBOARDING]*
+
+**N9.** "Bomber friendly fire still breaks big waves. Bait one into the pack and
+the wave kills itself. It's an exploit, not a feature — trivializes SWARM and
+BOMB SQUAD." *[BALANCE]*
+
+**N10.** "There's genuinely no settings menu. Volume is a tiny note glyph in the
+corner I had to find by accident. No key rebind, no shake toggle, no nothing.
+The whole options situation is the review." *[NO OPTIONS]*
+
+**N11.** "Once you hit wave 20+ you've seen every event and both bosses cycle
+twice. It's deep FOR a free game but it does still loop eventually. Needs an
+endless mode twist or a third boss." *[REPETITIVE / ENDGAME]*
+
+**N12.** "I want to love it but on my non-QWERTY layout the fixed keys are
+genuinely unusable and there's no fix. Refunding my... oh wait it's free. Still
+can't recommend." *[NO REBIND]*
+
+**N13.** "Normal is a snooze for 4 waves then the boss can spike you. Still no
+smooth ramp after all these updates. Either bored or suddenly fighting for my
+life." *[DIFFICULTY CURVE]*
+
+**N14.** "MERCY is cool but I had to look it up online to understand it existed.
+Spare vs kill vs flee with no tutorial and a 3-second timer is stressful in the
+wrong way. Tell me the controls when it happens." *[MERCY ONBOARDING]*
+
+**N15.** "Meta progression is still shallow — 6 skins and stats. No upgrades,
+no new moves, no weapons. Once you've got the skins there's nothing to grind.
+Long-term it runs dry." *[META DEPTH]*
+
+**N16.** "Restart dumps me to the title every time. A quick-retry from game over
+would keep the one-more-go flow alive. Extra clicks between deaths." *[RESTART
+UX]*
+
+**N17.** "The screen shake toggle and key rebind are the SAME missing feature:
+there's no settings screen. Both keep getting mentioned in the forums and
+nothing happens. Please." *[NO OPTIONS / SHAKE]*
+
+**N18.** "Combat on mobile is still 3-4x weaker than keyboard for me. The
+buttons are big enough now but fighting with thumbs just can't chain like
+J/K/K. Not the game's fault entirely but it's a different, lesser experience."
+*[MOBILE]*
+
+**N19.** "Wish I could pause-rebind mid-run when my hand starts cramping instead
+of quitting to title. Options only on the title screen would even be fine, just
+give me SOMETHING." *[NO REBIND]*
+
+**N20.** "The bomber chain and the splitter splits can multiply into a crowd
+that feels unfair — you clear two and suddenly there are five. Needs a cap or a
+tell before it spirals." *[BALANCE]*
+
+---
+
+## Complaint Cluster Analysis (Round 3, 20 negative reviews)
+
+| # | Cluster | Mentions | Recurred since | Tractable? |
+|---|---|---|---|---|
+| **1** | **No key rebinding / no options menu** | **8** (N1,N2,N3,N4,N10,N12,N17,N19) | Round 1 — every round | YES, clear root cause |
+| 2 | Screen-shake / motion-sickness toggle | 4 (N5,N6,N17 + N10 partial) | Round 1 | YES (cheap, same menu) |
+| 3 | Mobile controls (palm/haptics/layout) | 3 (N7,N18 + partial) | Round 1 | Partial |
+| 4 | Difficulty curve (flat then boss spike) | 2 (N13 + partial) | Round 1 | Tuning |
+| 5 | Second Wind / MERCY onboarding | 2 (N8,N14) | Round 1 | Yes |
+| 6 | Balance (bomber chains, splitter spirals) | 2 (N9,N20) | Round 1 | Tuning |
+| 7 | Repetitive endgame / more bosses | 1 (N11) | Round 2 | Big build |
+| 8 | Meta-progression depth | 1 (N15) | Round 1 | Big build |
+| 9 | Restart UX (quick-retry) | 1 (N16) | Round 1 | Yes |
+
+### Verdict (Round 3)
+**The dominant complaint is now structural plumbing, not content: there is no
+options/settings menu and no way to rebind keys** — 8 of 20 negative reviews
+(40%), and it is the single complaint that has recurred in **every** prior
+round (R1 #10/#11, R2 N3) without ever being addressed. Players literally call
+it "PC table stakes" and "in 2026 this is wild." It uniquely affects **100% of
+keyboard players** (the dominant platform) and is the reason several say they
+"can't recommend" an otherwise-loved game. The #2 cluster (screen-shake toggle,
+4 mentions) is the same missing feature — a settings screen — and is an
+accessibility issue that excludes players.
+
+Content complaints (the old #1) have effectively vanished after Rounds 5/13's
+content expansion. The leverage has moved to the never-fixed plumbing layer.
+
+### Root cause (verified in source)
+`js/scenes/GameScene.js` `_setupKeyboard()` (lines 305–327) hardcodes every
+binding via `k.addKey('A')`, `k.addKey('J')`, etc. There is **no binding layer,
+no persistence, and no options/settings scene** anywhere in the repo. A
+repo-wide search for `rebind|options|settings|remap` returns nothing in `js/`.
+Movement polling reads `k.left.isDown` directly (line 1929–1931); action keys
+are wired via fixed `key.on('down', …)` callbacks. Likewise the impulse shake
+(`GameScene._shake`, line 427) has no scale factor an accessibility toggle
+could drive. So:
+- players cannot change any key, and
+- there is no screen to put a shake-reduction toggle in even if it existed.
+
+### Fix (Round 3)
+Add a persistent **options/settings layer** that solves the #1 and #2 clusters
+together (they are the same missing screen):
+1. A new `js/systems/Options.js` module (mirrors `Meta.js`'s localStorage
+   pattern): bindable actions + defaults, `bindings()/setBinding()/reset()`,
+   and a `shakeMode` setting (`full` | `reduced` | `off`).
+2. `GameScene._setupKeyboard()` reads bindings from `Options` instead of
+   hardcoded keys; arrow keys + SPACE remain fixed alternates so default
+   behaviour is byte-identical (zero regression). `_shake()` scales amplitude
+   by `shakeMode`.
+3. A new **`OptionsScene`** (reachable from the Title via an OPTIONS button +
+   `O` key, and from the pause overlay) that lists each action + current key,
+   captures the next key press to rebind, rejects duplicates, offers a SHAKE
+   toggle and a RESET-TO-DEFAULTS, and closes on ESC/BACK.
+
+Then iterate: fix → test → next round.
+
+---
+
+# Round 3 — Fix shipped: rebindable controls + options menu + shake toggle
+
+### What shipped
+- **`js/systems/Options.js`** (new, mirrors `Meta.js`'s localStorage pattern + an
+  in-memory cache so the per-frame readers never hit `JSON.parse`): the 7
+  bindable actions (left/right/jump/punch/kick/burst/spare) with defaults that
+  reproduce the original layout **byte-for-byte** (`A D W J K L H`), a
+  duplicate-aware `setBinding` that **swaps** (never orphans a key), a
+  `resetBindings`, and a `shakeMode` (`full` / `reduced` / `off`).
+- **`js/scenes/OptionsScene.js`** (new): a modal overlay launched from the
+  **Title** (gear button top-right + `O` key) and from the **pause overlay**
+  (OPTIONS button). Lists each action + current key, click-to-capture the next
+  keypress (DOM `event.code` → Phaser key name), a SHAKE cycle row, a
+  RESET-TO-DEFAULTS, BACK/ESC to close. ESC while capturing cancels the rebind;
+  ESC otherwise closes the overlay. A full-screen interactive backdrop absorbs
+  stray clicks so they never start the game or unpause.
+- **`GameScene.js`**: `_setupKeyboard` now reads bindings from `Options` instead
+  of hardcoded keys; **arrow keys + SPACE remain as fixed alternates** (always
+  on, not rebindable) so the documented defaults and accessibility keep working
+  after any rebind. `_shake` multiplies its amplitude by
+  `Options.shakeScale()` (`1` / `0.4` / `0`) and short-circuits on `off`.
+  `_togglePause` no-ops while the options overlay is open (ESC closes options,
+  not toggles pause).
+- **`TitleScene.js`**: OPTIONS gear button + `O` key; `start()` guarded so
+  SPACE/ENTER/click can't fire through the overlay.
+- **`UIScene.js`**: OPTIONS button in the pause overlay for mid-session rebinding.
+- **`main.js`**: registers `OptionsScene` + exposes `Options` on `window` for tests.
+
+### Design decisions (multi-option → most-enjoyable)
+- **Defaults must not regress.** Out-of-the-box behaviour is identical to pre-fix
+  (`A/D/W` + arrows + SPACE all move/jump; `J/K/L/H` act). Verified by the CI
+  suite continuing to pass unchanged.
+- **Fixed alternates, not duplicate primaries.** Arrow keys + SPACE are hardcoded
+  as always-on movement/jump alternates rather than made rebindable secondaries.
+  This keeps the rebind UI to 7 simple rows and guarantees a player can never
+  strand themselves without movement — a real risk with free-form secondary binds.
+- **Swap-on-duplicate.** Binding PUNCH to K moves KICK to PUNCH's old key (J)
+  rather than rejecting the input. Surfaces no error state, never orphans a key,
+  and keeps the invariant that every primary binding is unique (asserted in tests).
+- **Shake toggle rides along in the same menu.** The #2 complaint (motion
+  sickness) is the same missing-feature (no settings screen); `reduced` (40%) is
+  the middle ground that keeps the juice readable while giving relief.
+
+### Verification (Round 3)
+- New `tests/options.spec.js` **10/10** (registered as the `options` dev project):
+  defaults reproduce the original layout; overlay opens from title (O key) without
+  starting the game; real capture-UI rebind (click row → press key → persists);
+  ESC closes; **rebound key drives the real combat pipeline** (U punches for 11
+  dmg, freed J does nothing); fixed alternates survive a rebind (SPACE still
+  jumps, LEFT arrow still moves); shake toggle scales the impulse (5 → 5 / 2.0 /
+  0); duplicate bind swaps; reset restores defaults; options reachable from a
+  paused run (and closing it does NOT auto-resume).
+- Official CI **5/5 green** (desktop ×3, mobile-landscape, mobile-portrait) — the
+  byte-identical defaults produce zero regression.
+- Key dev suites green after the keyboard refactor: `depth` 3/3, `burst` 8/8
+  (incl. a 75s real-play run), `laststand` 4/4, `music` 4/4, `firstminute` 11/11.
+
+### Honest caveats
+- Rebinding is stored by **Phaser key name** resolved from the physical
+  `event.code`, so it tracks physical key position (good for ergo/AZERTY) rather
+  than produced character. Mouse buttons / gamepads are not supported (out of
+  scope for a keyboard-overlay fix; a future input layer could add them).
+- A pre-existing harness quirk was surfaced (not introduced) by the new tests:
+  Playwright `keyboard.press` in headless Chromium fires repeated keydowns, which
+  the game's edge-triggered attacks honour as "hold to repeat" (intended on real
+  hardware too — holding J is meant to chain). Tests that check jump-after-press
+  therefore clear enemies first to avoid the combat lock; real players tapping a
+  key once fire a single keydown and are unaffected.
+
+The review-driven loop continues: the next batch of reviews (post-options) is
+expected to migrate toward the next never-fixed cluster (mobile layout / Second
+Wind onboarding / meta depth), per the fix-order heuristic.
+

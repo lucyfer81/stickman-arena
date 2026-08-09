@@ -4,12 +4,15 @@ import { TitleScene } from './scenes/TitleScene.js';
 import { GameScene } from './scenes/GameScene.js';
 import { UIScene } from './scenes/UIScene.js';
 import { GameOverScene } from './scenes/GameOverScene.js';
+import { OptionsScene } from './scenes/OptionsScene.js';
 import { AudioManager } from './systems/AudioManager.js';
 import { Meta } from './systems/Meta.js';
+import { Options } from './systems/Options.js';
 
 const audio = new AudioManager();
 window.__audio = audio;
 window.__meta = Meta;
+window.__options_module = Options;
 
 const config = {
   type: Phaser.AUTO,
@@ -29,7 +32,7 @@ const config = {
     activePointers: 3,
   },
   physics: { default: 'arcade' },
-  scene: [BootScene, TitleScene, GameScene, UIScene, GameOverScene],
+  scene: [BootScene, TitleScene, GameScene, UIScene, GameOverScene, OptionsScene],
 };
 
 const game = new Phaser.Game(config);

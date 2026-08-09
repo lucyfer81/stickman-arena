@@ -6,6 +6,7 @@ import { drawBackground } from '../utils/background.js';
 import { aabb, clamp, clamp01, sign, rand, randInt } from '../utils/math.js';
 import { Meta } from '../systems/Meta.js';
 import { rollEvent, getEvent } from '../systems/Events.js';
+import { Options } from '../systems/Options.js';
 
 export class GameScene extends Phaser.Scene {
   constructor() { super('Game'); }
@@ -305,24 +306,29 @@ export class GameScene extends Phaser.Scene {
   _setupKeyboard() {
     const k = this.input.keyboard;
     const c = this.controls;
+    // Bindings come from the Options module (rebindable, persisted); arrow keys
+    // + SPACE stay as FIXED alternates so default behaviour is byte-identical
+    // (A/D move, arrows move; W/SPACE/UP jump) and rebinding can never strand
+    // the player without movement. See js/systems/Options.js + OptionsScene.
+    const b = Options.bindings();
     this.keys = {
-      left: k.addKey('A'), left2: k.addKey('LEFT'),
-      right: k.addKey('D'), right2: k.addKey('RIGHT'),
-      up: k.addKey('W'), up2: k.addKey('UP'),
-      jump: k.addKey('SPACE'),
-      punch: k.addKey('J'),
-      kick: k.addKey('K'),
-      burst: k.addKey(CONFIG.BURST.KEY),
-      spare: k.addKey('H'),
+      left: k.addKey(b.left), right: k.addKey(b.right),
+      jump: k.addKey(b.jump),
+      punch: k.addKey(b.punch), kick: k.addKey(b.kick),
+      burst: k.addKey(b.burst), spare: k.addKey(b.spare),
+      // fixed alternates (not rebindable) — accessibility + documented defaults
+      altLeft: k.addKey('LEFT'), altRight: k.addKey('RIGHT'),
+      altJump: k.addKey('UP'), altJump2: k.addKey('SPACE'),
     };
     const resume = () => this.audio && this.audio.resume();
-    this.keys.jump.on('down', () => { resume(); c.jumpPressed = true; });
-    this.keys.up.on('down', () => { resume(); c.jumpPressed = true; });
-    this.keys.up2.on('down', () => { resume(); c.jumpPressed = true; });
-    this.keys.punch.on('down', () => { resume(); c.punchPressed = true; });
-    this.keys.kick.on('down', () => { resume(); c.kickPressed = true; });
-    this.keys.burst.on('down', () => { resume(); c.burstPressed = true; });
-    this.keys.spare.on('down', () => { resume(); c.sparePressed = true; });
+    const edge = (key, fn) => key.on('down', () => { resume(); fn(); });
+    edge(this.keys.jump, () => { c.jumpPressed = true; });
+    edge(this.keys.altJump, () => { c.jumpPressed = true; });
+    edge(this.keys.altJump2, () => { c.jumpPressed = true; });
+    edge(this.keys.punch, () => { c.punchPressed = true; });
+    edge(this.keys.kick, () => { c.kickPressed = true; });
+    edge(this.keys.burst, () => { c.burstPressed = true; });
+    edge(this.keys.spare, () => { c.sparePressed = true; });
     k.on('keydown-ESC', () => this._togglePause());
   }
 
@@ -382,6 +388,8 @@ export class GameScene extends Phaser.Scene {
 
   _togglePause() {
     if (this.gameOver) return;
+    // don't toggle when the options overlay is open (ESC closes options instead)
+    if (this.registry.get('optionsOpen')) return;
     this.paused = !this.paused;
     if (this.ui) this.ui.setPaused(this.paused);
     this.audio && this.audio.setMuted(this.paused);
@@ -426,6 +434,10 @@ export class GameScene extends Phaser.Scene {
   // machine-gun punch doesn't accumulate shake into nausea).
   _shake(amp, life, freq, dirX = 0, dirY = 0) {
     const S = CONFIG.FEEL.SHAKE;
+    // accessibility: scale the impulse by the player's chosen shake mode
+    // (full / reduced / off). 'off' short-circuits so the screen never moves.
+    amp *= Options.shakeScale();
+    if (amp <= S.CUTOFF) return;
     // residual effective amplitude (decayed value right now)
     const residual = this.shakeAmp * (this.shakeT / this.shakeLife);
     if (amp < residual - S.CUTOFF) return; // not stronger than what's playing — skip
@@ -1926,9 +1938,9 @@ export class GameScene extends Phaser.Scene {
     const k = this.keys;
     const c = this.controls;
     let kbDir = 0;
-    if (k.left.isDown || k.left2.isDown) kbDir -= 1;
-    if (k.right.isDown || k.right2.isDown) kbDir += 1;
-    const kbJumpHeld = k.jump.isDown || k.up.isDown || k.up2.isDown;
+    if (k.left.isDown || k.altLeft.isDown) kbDir -= 1;
+    if (k.right.isDown || k.altRight.isDown) kbDir += 1;
+    const kbJumpHeld = k.jump.isDown || k.altJump.isDown || k.altJump2.isDown;
     if (kbJumpHeld) this.audio && this.audio.resume();
 
     c.dir = c.touchActive ? c.touchDir : kbDir;
