@@ -28,7 +28,7 @@ export class OptionsScene extends Phaser.Scene {
       .setInteractive().setDepth(300);
 
     // ---- panel ----
-    const pw = 760, ph = 600, px = cx - pw / 2, py = 70;
+    const pw = 760, ph = 640, px = cx - pw / 2, py = 70;
     this.panel = this.add.graphics().setDepth(301);
     this.panel.fillStyle(0x0c1326, 0.96);
     this.panel.fillRoundedRect(px, py, pw, ph, 18);
@@ -67,6 +67,20 @@ export class OptionsScene extends Phaser.Scene {
     const shakeZone = this.add.zone(cx, shakeY, pw - 120, rowH).setInteractive({ useHandCursor: true }).setDepth(304);
     shakeZone.on('pointerdown', () => this._cycleShake());
     this._refreshShake();
+
+    // ---- haptics toggle row (mobile rumble on confirm/hurt/kill) ----
+    const hapticsY = shakeY + rowH;
+    this.hapticsLabel = this.add.text(cx - 200, hapticsY, 'HAPTICS', {
+      fontFamily: 'Arial Black', fontSize: '19px', color: '#eaf4ff',
+      stroke: '#0b1a2a', strokeThickness: 4,
+    }).setOrigin(0, 0.5).setDepth(302);
+    this.hapticsValue = this.add.text(cx + 200, hapticsY, '', {
+      fontFamily: 'Arial Black', fontSize: '19px', color: '#ffd23f',
+      stroke: '#0b1a2a', strokeThickness: 4,
+    }).setOrigin(1, 0.5).setDepth(302).setInteractive({ useHandCursor: true });
+    const hapticsZone = this.add.zone(cx, hapticsY, pw - 120, rowH).setInteractive({ useHandCursor: true }).setDepth(304);
+    hapticsZone.on('pointerdown', () => this._cycleHaptics());
+    this._refreshHaptics();
 
     // ---- reset + back ----
     const bottomY = py + ph - 64;
@@ -166,6 +180,19 @@ export class OptionsScene extends Phaser.Scene {
     this.audio && this.audio.ui();
   }
 
+  _refreshHaptics() {
+    const m = Options.hapticsMode().toUpperCase();
+    this.hapticsValue.setText('\u25C0  ' + m + '  \u25B6');
+    this._publish();
+  }
+  _cycleHaptics() {
+    const modes = Options.HAPTICS_MODES;
+    const idx = modes.indexOf(Options.hapticsMode());
+    Options.setHapticsMode(modes[(idx + 1) % modes.length]);
+    this._refreshHaptics();
+    this.audio && this.audio.ui();
+  }
+
   _beginCapture(actionId) {
     this.capturing = actionId;
     this._flash('PRESS A KEY for ' + Options.ACTIONS.find((a) => a.id === actionId).label + '  \u00B7  ESC to cancel', '#ffd23f');
@@ -255,6 +282,7 @@ export class OptionsScene extends Phaser.Scene {
         from: this.from,
         bindings: Options.bindings(),
         shakeMode: Options.shakeMode(),
+        hapticsMode: Options.hapticsMode(),
       };
     }
   }

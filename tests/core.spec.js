@@ -87,17 +87,18 @@ test.describe('Desktop', () => {
     await waitTele(page, (t) => t.state === 'gameover', 30000);
     await page.evaluate(() => clearInterval(window.__killTimer));
     await page.screenshot({ path: 'tests/shots/07-gameover.png' });
-    // restart (retry R past the brief input lockout on the game-over screen).
-    // Restart returns to the Title so the player can re-pick skin/difficulty/daily.
+    // restart. R / SPACE / ENTER / tap is a QUICK-RETRY: it drops straight into
+    // a new run (same difficulty/skin/daily) — the one-more-go flow. T goes to
+    // the title menu to change settings. (Round C #9 fix.)
     let restarted = false;
     const restartDeadline = Date.now() + 10000;
     while (Date.now() < restartDeadline) {
       await page.keyboard.press('R');
       await page.waitForTimeout(250);
       const tt = await telemetry(page);
-      if (tt && tt.state === 'title') { restarted = true; break; }
+      if (tt && tt.state === 'game') { restarted = true; break; }
     }
-    expect(restarted).toBe(true);
+    expect(restarted, 'R should quick-retry into a new game run').toBe(true);
     expect(errors).toEqual([]);
   });
 });

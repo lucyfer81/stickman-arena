@@ -94,6 +94,14 @@ const VARIANTS = {
     palette: { limb: 0x9aff6b, joint: 0xc6ffae, head: 0xe6ffd2, accent: 0x16c45a, fist: 0xeaf4ff },
     health: 200, speed: 108, damage: 16, scale: 1.45, score: 1500, attackReach: 110,
   },
+  bossJuggernaut: {
+    // Boss variant C ("The Juggernaut"): a steel bulwark that cycles third. Its
+    // special is a telegraphed full-arena charge (super-armor dash the player
+    // must JUMP over) — distinct from the slammer's shockwaves and the caster's
+    // barrage. Shares HP bar / enrage / kill-payoff infra; isBoss is true.
+    palette: { limb: 0x8da4bf, joint: 0xc6d6e8, head: 0xeaf2ff, accent: 0x4a6a8a, fist: 0xffd23f },
+    health: 240, speed: 100, damage: 18, scale: 1.5, score: 1500, attackReach: 116,
+  },
 };
 
 export class Enemy extends Stickman {
@@ -132,13 +140,15 @@ export class Enemy extends Stickman {
     this.swarmSpeedMul = 1; // live pack-pressure move-speed bonus
     this.flankDir = 1;    // desired side relative to player (+1 right / -1 left)
     // boss-only state
-    this.isBoss = variant === 'boss' || variant === 'bossCaster';
-    this.bossKind = variant === 'bossCaster' ? 'caster' : 'slammer';
+    this.isBoss = variant === 'boss' || variant === 'bossCaster' || variant === 'bossJuggernaut';
+    this.bossKind = variant === 'bossCaster' ? 'caster' : variant === 'bossJuggernaut' ? 'juggernaut' : 'slammer';
     this.enraged = false;
     this.slam = null;     // { phase: 'windup'|'leap'|'recover', t } (slammer)
     this.cast = null;     // { phase: 'windup'|'recover', t } (caster barrage)
+    this.charge = null;   // { phase: 'windup'|'dash'|'recover', t, dir, hit } (juggernaut)
     this.slamCd = this.isBoss ? 2.0 : 0;  // first slam after a brief grace
     this.castCd = this.isBoss ? 2.2 : 0;  // first barrage after a brief grace
+    this.chargeCd = this.isBoss ? 2.5 : 0; // first charge after a brief grace
     // shielder guard state — down for GUARD_BREAK_TIME after a heavy hit lands
     this.guardBroken = 0;
     // bomber fuse state — { t } once close enough; detonates at FUSE_TIME
@@ -257,6 +267,11 @@ export class Enemy extends Stickman {
       return true;
     }
     if (this.isBoss && this.cast && this.cast.phase !== 'windup') {
+      return true;
+    }
+    // JUGGERNAUT charge: once the dash locks in, it cannot be interrupted — the
+    // counter is to JUMP over it, not stagger it (mirrors slam/cast armor).
+    if (this.isBoss && this.charge && this.charge.phase === 'dash') {
       return true;
     }
     // CHARGER commitment: once the dash locks in, light hits can't shove it off
@@ -611,6 +626,15 @@ export class Enemy extends Stickman {
       return;
     }
 
+    // JUGGERNAUT BOSS charge: a telegraphed full-arena dash that takes over the
+    // body once committed (windup -> dash -> recover). Progress before melee AI.
+    if (this.charge) {
+      this._progressCharge(dt, player);
+      this._physics(dt);
+      this._render();
+      return;
+    }
+
     // BOMBER fuse: once lit (started in AI below), it runs to completion and
     // detonates — takes priority over a normal melee swing, like the boss slam.
     if (this.fuse) {
@@ -700,6 +724,14 @@ export class Enemy extends Stickman {
         this.castCd -= dt;
         if (this.onGround && this.castCd <= 0 && dist < CONFIG.BOSS.CAST.RANGE) {
           this._startCast();
+          this._physics(dt);
+          this._render();
+          return;
+        }
+      } else if (this.bossKind === 'juggernaut') {
+        this.chargeCd -= dt;
+        if (this.onGround && this.chargeCd <= 0 && dist < CONFIG.BOSS.CHARGE.RANGE) {
+          this._startCharge();
           this._physics(dt);
           this._render();
           return;
@@ -1005,6 +1037,80 @@ export class Enemy extends Stickman {
     if (a.t >= C.RECOVER) {
       this.cast = null;
       this.castCd = this.enraged ? C.INTERVAL_ENRAGED : C.INTERVAL;
+      this.glow = 0;
+      this.state = 'idle';
+    }
+  }
+
+  // ---- juggernaut boss charge ----
+  // A telegraphed full-arena dash. Windup locks the direction toward the player,
+  // then the boss commits to a high-speed horizontal dash with super-armor and a
+  // tall hitbox (one contact hit per dash). It only stops at the far wall or on a
+  // max-time safety cap, then pauses in a long recover — the punish window. The
+  // counter is to JUMP over the dash (a single read), distinct from the slammer's
+  // repeated shockwaves (jump each wave) and the caster's dodgeable barrage.
+  _startCharge() {
+    this.charge = { phase: 'windup', t: 0, dir: 0, hit: false };
+    this.glow = 0;
+    this.state = 'idle';
+  }
+
+  _progressCharge(dt, player) {
+    const a = this.charge;
+    const C = CONFIG.BOSS.CHARGE;
+    const scene = this.scene;
+    a.t += dt;
+    if (a.phase === 'windup') {
+      // TELEGRAPH: glow ramps + face + plant. Direction locks at the end so the
+      // player can read the lane and pre-jump.
+      this.facing = sign(player.x - this.x) || this.facing;
+      this.glow = clamp01(a.t / C.WINDUP);
+      this.vx *= clamp01(1 - 8 * dt);
+      if (a.t >= C.WINDUP) {
+        a.dir = sign(player.x - this.x) || this.facing;
+        a.phase = 'dash'; a.t = 0; this.glow = 1;
+        this.facing = a.dir;
+        this.vx = a.dir * C.SPEED;
+        scene.audio && scene.audio.kick();
+        scene.dustBurst && scene.dustBurst(this.x, CONFIG.GROUND_Y, 16);
+      }
+      return;
+    }
+    if (a.phase === 'dash') {
+      // committed straight-line dash at the locked velocity (set once above).
+      // The physics step applies vx; here we just enforce the lane + check the
+      // one-shot contact hit. End at the far wall or the safety time cap.
+      this.vx = a.dir * C.SPEED;
+      const p = player;
+      if (!a.hit && !p.dead && p.invuln <= 0) {
+        const feetClear = CONFIG.GROUND_Y - p.y;
+        // tall hitbox: catches a grounded/low player; a clean jump clears it.
+        if (feetClear < 64 && Math.abs(p.x - this.x) < 54 * this.scale) {
+          a.hit = true;
+          const dmg = Math.round(C.DAMAGE * (scene.mods ? scene.mods.enemyDmg : 1));
+          if (p.takeHit(dmg, this.x, CONFIG.ENEMY.KNOCKBACK)) scene._onPlayerHurt && scene._onPlayerHurt(this, { from: this.x });
+          scene._impactRing && scene._impactRing(p.x, p.y - 60, 0xff3b30, scene._ringSpec ? scene._ringSpec('HURT') : { life: 0.3, maxR: 70, width: 5 });
+        }
+      }
+      const atWall = (a.dir < 0 && this.x <= CONFIG.WALL_LEFT + 14) || (a.dir > 0 && this.x >= CONFIG.WALL_RIGHT - 14);
+      if (atWall || a.t >= C.MAX_TIME) {
+        a.phase = 'recover'; a.t = 0; this.vx = 0; this.glow = 0.4;
+        // wall-slam feedback: a heavy ground ring + downward punch-zoom sells the
+        // weight of the juggernaut crashing into the wall.
+        if (scene._impactRing) scene._impactRing(this.x, CONFIG.GROUND_Y - 10, 0x8da4bf, scene._ringSpec ? scene._ringSpec('SLAM') : { life: 0.4, maxR: 120, width: 6 });
+        if (scene._punchZoom) scene._punchZoom(CONFIG.FEEL.ZOOM.SLAM, 0, CONFIG.FEEL.SHOVE.DOWN);
+        if (scene._shake) { const S = CONFIG.FEEL.SHAKE.SLAM; scene._shake(S.amp, S.life, S.freq, a.dir, 0.4); }
+        scene.dustBurst && scene.dustBurst(this.x, CONFIG.GROUND_Y, 24);
+        scene.audio && scene.audio.bigHit();
+        scene._haptic && scene._haptic(40);
+      }
+      return;
+    }
+    // recover: a stationary vulnerable window — the punish for jumping the dash.
+    this.vx *= clamp01(1 - 10 * dt);
+    if (a.t >= C.RECOVER) {
+      this.charge = null;
+      this.chargeCd = this.enraged ? C.INTERVAL_ENRAGED : C.INTERVAL;
       this.glow = 0;
       this.state = 'idle';
     }

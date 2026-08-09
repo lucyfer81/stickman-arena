@@ -953,4 +953,48 @@ in 2026 is wild"却从未动过，影响 100% 键盘玩家——是最高杠杆�
   连发 keydown，游戏边沿触发攻击按"按住连击"语义响应（真机按住 J 本就设计为连击）。测
   跳跃的用例先清场避开战斗锁；真机轻敲只发一次 keydown 不受影响。
 
+## Round C（续）— 修复本轮找出的全部剩余抱怨
+
+Round 3 评价的 9 个抱怨簇里 #1/#2 已修；本轮把剩余 7 个全部处理：
+
+**#5 引导**（`GameScene.js`）：Second Wind 与 MERCY 首次触发（localStorage 一次性标志）显示
+详细说明（SW："1 HP — FIGHT + GRAB HEALTH TO REFORM"；MERCY："H=SPARE / ATTACK=KILL，or wait
+— it flees"，SPARE 键读实际绑定）。老玩家保持简短横幅。
+
+**#9 快速重开**（`GameOverScene.js`）：R/SPACE/ENTER/点击 = 直接进新局（保留难度/皮肤/daily），
+T = 回标题菜单。`restart()` 改为 `scene.start('Game')`；新增 `toTitle()`。顺带修了一个 UIScene
+teardown 竞争：GameOver→Game 直接重开时，UI 重启首帧会对正在销毁的 lazy 文本调 setColor 抛
+`cut of null`——给 `_burstLabel/_rageLabel/_brokenLabel/_bossLabel` 的每帧 setText/setColor 加
+`label.scene` 守卫跳过已销毁对象（playthrough/core 重启流程受益）。
+
+**#4 难度曲线**（`GameScene._applyScaling`）：加中段坡度 `midBump = wave>=3 ? min(wave-2,4)*0.045 : 0`，
+wave 1-2 保持教学 floor，wave 3-4 激进度明显爬升，Boss 不再是"平地起墙"。
+
+**#6 平衡**（`config.js`+`GameScene.js`）：炸弹友伤链加 `BOMBER.CHAIN_MAX=3` 上限（单发最多连击
+3 敌，仍可 clutch 但不能独力清场）；分裂体加 `SPLITTER.MAX_SIMULT=4`（已存在 4 个 spawnling
+后新分裂产出递减至 0，防止"清俩变五个"）。
+
+**#3 移动端触感**（`Options.js`+`OptionsScene.js`+`GameScene.js`）：新增 HAPTICS 设置（on/off，
+默认 on）。GameScene `_haptic(ms)` 在 K.O./受伤/Boss 击杀/OVERDRIVE/破碎 处调 `navigator.vibrate`
+（桌面无振动器自动 no-op）；OptionsScene 加 HAPTICS 行（面板高度 600→640 容纳）。`Options._persist`
+重构为原子写全字段，避免 setter 互相擦除。
+
+**#7 第三 Boss「The Juggernaut」**（`config.js`+`Enemy.js`+`GameScene.js`）：钢蓝 1.5×、240hp，
+独有**冲锋**（预警 0.7s→锁定方向横穿全场超甲冲刺→撞墙 0.85s 恢复窗）。对抗=跳过它（单次读条），
+区别于 slammer 的连续冲击波与 caster 的弹幕。Boss 轮换改三轮（idx-1)%3：wave5=slammer、
+10=caster、15=juggernaut…；狂暴召唤 brute；复用全部 Boss 基础设施。
+
+**#8 元进度深度**（`Meta.js`+`GameScene.js`）：新增 4 个长期目标皮肤——PACIFIST(放5敌)、
+SURGE(放15次大招)、SLAYER(杀3 Boss)、PHOENIX(重塑2次)，绑定新累计统计
+totalMercy/totalBursts/totalBossKills/totalReforms（recordRun 累加）。`nextUnlock` 顺序重排，
+grind 从 6 皮肤扩到 10。GameScene 记录 bossKills 计数 + reform 标志传入 recordRun。
+
+### 验证（实跑，零回归）
+- 新增 `tests/roundc.spec.js` **7/7**（炸弹链上限、分裂上限、第三 Boss 刷出+冲锋命中+狂暴召
+  brute、4 个新皮肤解锁、快速重开 R→game、wave4>wave2 激进度）。
+- 官方 CI **5/5**（含 core 的 game-over 测试，已更新为 R=快速重开语义）。
+- 改动相关 dev 全绿：options 10/10、bossvariety 4/4、meta 2/2、retention 5/5、variety 24/24。
+- 合计 57 项测试零失败。
+
+
 

@@ -70,7 +70,7 @@ export class GameScene extends Phaser.Scene {
     this.hitsTaken = 0;
     this.healed = 0;
     this.kills = 0;
-    this.spawned = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0, shielder: 0, bomber: 0, ranger: 0, charger: 0, medic: 0, splitter: 0, spawnling: 0, boss: 0, bossCaster: 0 };
+    this.spawned = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0, shielder: 0, bomber: 0, ranger: 0, charger: 0, medic: 0, splitter: 0, spawnling: 0, boss: 0, bossCaster: 0, bossJuggernaut: 0 };
     this.tierBonuses = 0;
     this.firstBloodDone = false;     // FIRST BLOOD fires once on the run's first non-boss kill
     this.waveFirstSpawn = true;      // wave-2 first spawn is a vanguard mini-elite
@@ -102,6 +102,7 @@ export class GameScene extends Phaser.Scene {
     this.bursting = null;
     this.burstWave = 0;          // current expanding-wave radius (for draw + AoE)
     this.bursts = 0;             // count of Overdrives unleashed this run (telemetry)
+    this.bossKills = 0;          // count of bosses defeated this run (meta stat)
 
     // MERCY 「The Coward's End」state. One surrender per wave (mercyDone gates
     // the trigger); mercyActive holds the enemy + the wait-window timer while
@@ -174,14 +175,14 @@ export class GameScene extends Phaser.Scene {
         spawnBossKind: (kind) => {
           for (const e of this.enemies) e.destroy();
           this.enemies = []; this.boss = null; this.shockwaves = []; this.hazards = []; this.projectiles = []; this.meteorWarnings = []; this.debris = [];
-          const variant = kind === 'caster' ? 'bossCaster' : 'boss';
+          const variant = kind === 'caster' ? 'bossCaster' : kind === 'juggernaut' ? 'bossJuggernaut' : 'boss';
           const e = new Enemy(this, CONFIG.WALL_LEFT + 40, CONFIG.GROUND_Y, variant);
           e.facing = 1; e.flankDir = 1;
           this._applyScaling(e, Math.max(this.wave, 10));
           this.boss = e; this.enemies.push(e);
           return e.bossKind;
         },
-        bossFireSpecial: () => { if (this.boss && !this.boss.dead) { this.boss.slamCd = 0; this.boss.castCd = 0; return true; } return false; },
+        bossFireSpecial: () => { if (this.boss && !this.boss.dead) { this.boss.slamCd = 0; this.boss.castCd = 0; this.boss.chargeCd = 0; return true; } return false; },
         setBossHp: (n) => { if (this.boss && !this.boss.dead) { this.boss.health = n; } },
         // route a lethal player strike through the real combat pipeline so the
         // BOSS DOWN payoff (score/slowmo/banner/heal drop) fires exactly as in play.
@@ -447,6 +448,16 @@ export class GameScene extends Phaser.Scene {
     this.shakeFreq = freq || 34;
     this.shakeDirX = dirX;
     this.shakeDirY = dirY;
+  }
+
+  // MOBILE HAPTICS — a tiny navigator.vibrate pulse at the moments that most
+  // need tactile confirmation (the review complaint was "never know if a tap
+  // registered"). No-op on desktop (no vibrator). Gated by Options.haptics().
+  // Kept to peaks (kill / hurt / overdrive / second wind) so it never buzz-spams.
+  _haptic(ms) {
+    if (!Options.haptics()) return;
+    const n = (typeof navigator !== 'undefined') ? navigator.vibrate : null;
+    if (n) try { n.call(navigator, ms); } catch (e) {}
   }
 
   // expanding impact ring — the classic impact tell. Drawn persistently on its
@@ -769,7 +780,13 @@ export class GameScene extends Phaser.Scene {
     // RETENTION: floor early-wave aggression so the first minute has stakes — a
     // passive/casual player now takes a few hits instead of none. The floor only
     // lifts waves 1-3 (the curve exceeds it after); hardcore can still dodge.
-    const aggrCurve = 0.8 + Math.min(n - 1, 8) * 0.07;
+    const aggrBase = 0.8 + Math.min(n - 1, 8) * 0.07;
+    // SMOOTHER RAMP: the review complaint was "a snooze for 4 waves then a boss
+    // wall." Waves 1-2 stay gentle (the teaching truce), but from wave 3 the
+    // aggression climbs faster so the approach to the boss is a real ramp, not a
+    // flat line. Hardcore can still dodge; casuals now take hits earlier.
+    const midBump = n >= 3 ? Math.min(n - 2, 4) * 0.045 : 0;
+    const aggrCurve = aggrBase + midBump;
     e.aggrMul = Math.max(CONFIG.RETENTION.EARLY_AGR_FLOOR, aggrCurve) * m.aggr;
     e.dmgMul = m.enemyDmg;
     // FRENZY event: a glass-cannon remix — enemies move + attack much faster but
@@ -786,14 +803,16 @@ export class GameScene extends Phaser.Scene {
   _spawnBoss() {
     const fromLeft = Math.random() < 0.5;
     const x = fromLeft ? CONFIG.WALL_LEFT + 40 : CONFIG.WALL_RIGHT - 40;
-    // alternate boss archetypes so every climactic wave isn't the same duel:
-    // boss-index 1 (wave 5), 3 (15), 5 (25)... = the slammer; even indexes
-    // (wave 10, 20, 30...) = the caster. Only real boss waves (multiples of 5)
-    // use the parity rule; spawning off-context (e.g. the spawnBoss test hook
-    // mid-wave-1) defaults to the classic slammer so the canonical boss holds.
+    // cycle three boss archetypes so every climactic wave isn't the same duel:
+    // boss-index 1 (wave 5), 4 (20), 7 (35)... = slammer; index 2 (wave 10),
+    // 5 (30)... = caster; index 3 (wave 15), 6 (45)... = juggernaut. Only real
+    // boss waves (multiples of 5) use the cycle; off-context spawns (e.g. the
+    // spawnBoss test hook mid-wave-1) default to the classic slammer.
     const isRealBossWave = (this.wave % CONFIG.BOSS.WAVE_EVERY === 0);
+    const idx = Math.round(this.wave / CONFIG.BOSS.WAVE_EVERY); // 1,2,3,...
+    const slot = (idx - 1) % 3;                                 // 0/1/2
     const variant = isRealBossWave
-      ? ((Math.round(this.wave / CONFIG.BOSS.WAVE_EVERY) % 2 === 1) ? 'boss' : 'bossCaster')
+      ? (slot === 0 ? 'boss' : slot === 1 ? 'bossCaster' : 'bossJuggernaut')
       : 'boss';
     const e = new Enemy(this, x, CONFIG.GROUND_Y, variant);
     e.facing = fromLeft ? 1 : -1;
@@ -802,6 +821,7 @@ export class GameScene extends Phaser.Scene {
     if (this.spawned) {
       if (this.spawned.boss != null) this.spawned.boss++;
       if (variant === 'bossCaster' && this.spawned.bossCaster != null) this.spawned.bossCaster++;
+      if (variant === 'bossJuggernaut' && this.spawned.bossJuggernaut != null) this.spawned.bossJuggernaut++;
     }
     this.boss = e;
     this.enemies.push(e);
@@ -1058,10 +1078,14 @@ export class GameScene extends Phaser.Scene {
       const dmg = Math.round(B.FIRE_DMG_PLAYER * this.mods.enemyDmg);
       if (p.takeHit(dmg, x, B.BLAST_KNOCKBACK)) this._onPlayerHurt(null, { from: x });
     }
-    // chain-damage other enemies in the radius — a baited bomber thins the pack
+    // chain-damage other enemies in the radius — a baited bomber thins the pack,
+    // but a per-blast cap (CHAIN_MAX) keeps it from solo-clearing a wave, which
+    // review feedback flagged as an exploit. Still rewarding for small clumps.
+    let chained = 0;
     for (const e of this.enemies) {
       if (e === b || e.dead) continue;
-      if (Math.abs(e.x - x) < B.BLAST_RADIUS) e.takeHit(26, x, B.BLAST_KNOCKBACK * 0.7, 0.04);
+      if (chained >= B.CHAIN_MAX) break;
+      if (Math.abs(e.x - x) < B.BLAST_RADIUS) { e.takeHit(26, x, B.BLAST_KNOCKBACK * 0.7, 0.04); chained++; }
     }
     // lingering ground fire
     this.spawnFireZone(x, { life: B.FIRE_LIFE, radius: B.FIRE_RADIUS, dps: B.FIRE_DPS });
@@ -1222,6 +1246,7 @@ export class GameScene extends Phaser.Scene {
     this.burst(p.x, p.y - 70, 0xffd23f, 56);
     this.burst(p.x, p.y - 70, 0xffffff, 30);
     this.dustBurst(p.x, CONFIG.GROUND_Y, 26);
+    this._haptic(75); // mobile: the player-chosen climax
     const bonus = Math.round(B.SCORE_PER_HIT * hits * this._scoreMul());
     this.score += bonus;
     this.ui.banner('OVERDRIVE!', '#ffd23f');
@@ -1305,7 +1330,19 @@ export class GameScene extends Phaser.Scene {
   // the "MERCY?" prompt the instant the kneel begins.
   _onSurrenderStart(e) {
     this.mercyActive = { enemy: e, t: 0 };
-    this.ui.banner('MERCY?', '#eaf4ff');
+    // First-time teaching: the controls are the complaint ("had to look it up").
+    // Show SPARE's bound key + the KILL/flee options the first time only, so
+    // veterans keep the terse "MERCY?" and newcomers aren't lost.
+    let firstMercy = false;
+    try { firstMercy = !localStorage.getItem('stickman_arena_mercy_seen'); } catch (err) {}
+    if (firstMercy) {
+      const spareKey = Options.keyLabel(Options.binding('spare'));
+      this.ui.banner('MERCY?  ' + spareKey + '=SPARE  /  ATTACK=KILL', '#eaf4ff');
+      this.ui.floatText('or wait \u2014 it flees', e.x, e.y - 220, '#9bb4c8', 18);
+      try { localStorage.setItem('stickman_arena_mercy_seen', '1'); } catch (err) {}
+    } else {
+      this.ui.banner('MERCY?', '#eaf4ff');
+    }
     // a soft cue: a brief music duck (if the audio engine supports it) + a
     // slow-mo beat so the moment lands. Slow-mo is small so play isn't disrupted.
     this.slowmo = Math.max(this.slowmo, 0.25);
@@ -1432,7 +1469,13 @@ export class GameScene extends Phaser.Scene {
   // here. Two spawnlings pop out at offsets, inheriting the wave/difficulty
   // curve so the adds are a real threat (not free). A burst sells the split.
   _onSplitterDeath(e) {
-    const n = Math.max(1, CONFIG.CONTENT.SPLITTER.SPAWN_COUNT);
+    // crowd cap: if spawnlings are already plentiful, produce fewer (down to 0)
+    // so chained splitter deaths can't spiral into an unfair mob. The cap keeps
+    // the split a crowd-pressure beat without the "suddenly there were five"
+    // spike review feedback complained about.
+    const existing = this.enemies.filter((o) => !o.dead && o.variant === 'spawnling').length;
+    const room = Math.max(0, CONFIG.CONTENT.SPLITTER.MAX_SIMULT - existing);
+    const n = Math.min(CONFIG.CONTENT.SPLITTER.SPAWN_COUNT, room);
     for (let i = 0; i < n; i++) {
       const side = i === 0 ? -1 : 1;
       const x = clamp(e.x + side * 34, CONFIG.WALL_LEFT + 10, CONFIG.WALL_RIGHT - 10);
@@ -1476,6 +1519,7 @@ export class GameScene extends Phaser.Scene {
     this._shake(SBK.amp * 1.05, SBK.life, SBK.freq, 0, 1);
     this.burst(p.x, p.y - 70, 0xff3b30, 50);
     this.burst(p.x, p.y - 70, 0xeaf4ff, 26);
+    this._haptic(110); // mobile: the "you almost died" beat
     // spawn the detached right arm as a short-lived physics prop
     this.debris.push({
       x: p.x + p.facing * 14, y: p.y - 96, vx: -p.facing * 220 + rand(-60, 60),
@@ -1487,7 +1531,14 @@ export class GameScene extends Phaser.Scene {
     const lx = clamp(p.x + rand(-150, 150), CONFIG.WALL_LEFT + 50, CONFIG.WALL_RIGHT - 50);
     this.pickups.push(new Pickup(this, lx, 80, 'health', { drop: true }));
     this.ui.banner('SECOND WIND!', '#ff3b30');
-    this.ui.floatText('SHATTERED', p.x, p.y - 200, '#ff3b30', 34);
+    // First-time teaching: the first time a player EVER hits Second Wind, spell
+    // out the goal (1 HP, kill/extend, grab health to reform) instead of just the
+    // name. The review complaint was "arm fell off, weird timer, died confused".
+    // One-shot per-install so veterans don't see the verbose line again.
+    let firstSW = false;
+    try { firstSW = !localStorage.getItem('stickman_arena_sw_seen'); } catch (e) {}
+    this.ui.floatText(firstSW ? '1 HP \u2014 FIGHT + GRAB HEALTH TO REFORM' : 'SHATTERED', p.x, p.y - 200, '#ff3b30', firstSW ? 26 : 34);
+    try { localStorage.setItem('stickman_arena_sw_seen', '1'); } catch (e) {}
     this.audio && this.audio.gameover && this.audio.bigHit && this.audio.bigHit();
     // the soundtrack turns desperate during the last stand.
     this.audio && this.audio.setMusicIntensity && this.audio.setMusicIntensity('broken');
@@ -1774,6 +1825,8 @@ export class GameScene extends Phaser.Scene {
         this.ui.floatText('BOSS DOWN!', enemy.x, enemy.y - 200 * enemy.scale, '#ffd23f', 40);
         this.pickups.push(new Pickup(this, enemy.x, enemy.y - 60, 'health'));
         this.audio && this.audio.bigHit();
+        this._haptic(90); // mobile: the run's biggest beat
+        this.bossKills++;
         return;
       }
       const gain2 = Math.round(enemy.v.score * mult * scoreMul);
@@ -1801,6 +1854,7 @@ export class GameScene extends Phaser.Scene {
       const SK = F.SHAKE.KILL;
       this._shake(SK.amp, SK.life, SK.freq, dirX, 0.6);
       this.audio && this.audio.bigHit();
+      this._haptic(28); // mobile: confirm the K.O.
       this.slowmo = 0.18;
       this.ui.floatText('K.O. +' + gain2, enemy.x, enemy.y - 150 * enemy.scale, enemy.v.palette.fist, 26);
       // chance to drop a pickup (more likely if player low). Bombers never drop
@@ -1849,6 +1903,7 @@ export class GameScene extends Phaser.Scene {
     // rattle the camera far more than landing a hit does, so damage feels costly.
     const SHU = F.SHAKE.HURT;
     this._shake(SHU.amp, SHU.life, SHU.freq, dirX, 0.4);
+    this._haptic(45); // mobile: getting hit must register physically
     // a hurt moment also nudges the player's own body via squash — sells recoil.
     if (this.player && CONFIG.FEEL.STRETCH) {
       const s = CONFIG.FEEL.STRETCH.HEAVY;
@@ -2157,7 +2212,7 @@ export class GameScene extends Phaser.Scene {
 
   _updateHUD() {
     const alive = this.enemies.filter((e) => !e.dead);
-    const counts = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0, shielder: 0, bomber: 0, ranger: 0, charger: 0, medic: 0, splitter: 0, spawnling: 0, boss: 0, bossCaster: 0 };
+    const counts = { grunt: 0, runner: 0, brute: 0, leaper: 0, vanguard: 0, shielder: 0, bomber: 0, ranger: 0, charger: 0, medic: 0, splitter: 0, spawnling: 0, boss: 0, bossCaster: 0, bossJuggernaut: 0 };
     for (const e of alive) if (counts[e.variant] != null) counts[e.variant]++;
     // boss HP for the top-of-screen bar (null when no boss is alive)
     const bossAlive = this.boss && !this.boss.dead ? this.boss : null;
@@ -2255,9 +2310,13 @@ export class GameScene extends Phaser.Scene {
     // existing high score is not mis-reported as a new record.
     const newBest = this.score > hs && this.score > 0;
     if (this.score > hs) { try { localStorage.setItem('stickman_arena_hs', String(this.score)); } catch (e) {} }
-    // meta-progression: persist stats, compute unlocks, track daily best
+    // meta-progression: persist stats, compute unlocks, track daily best. The
+    // extra counters (mercy spares / overdrives / boss kills / reforms) feed new
+    // long-term unlocks so there's something to grind beyond the launch skins.
     const rec = Meta.recordRun({
       kills: this.kills, wave: this.wave, bestCombo: this.bestCombo, score: this.score,
+      mercySpares: this.mercySpares, bursts: this.bursts,
+      bossKills: this.bossKills, reforms: (this.player && this.player.reformed) ? 1 : 0,
     });
     let newDailyBest = false;
     if (this.daily) newDailyBest = Meta.recordDaily(this.score);

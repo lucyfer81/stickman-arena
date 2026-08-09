@@ -213,7 +213,7 @@ export const CONFIG = {
     SCALE: 1.6,
     ATTACK_REACH: 120,
     SCORE: 1500,
-    NAME: { slammer: 'THE SLAMMER', caster: 'THE ORACLE' },
+    NAME: { slammer: 'THE SLAMMER', caster: 'THE ORACLE', juggernaut: 'THE JUGGERNAUT' },
     SLAM_INTERVAL: 3.4,           // seconds between slams (phase 1)
     SLAM_INTERVAL_ENRAGED: 2.2,   // phase 2 (<=50% hp)
     SLAM_WINDUP: 0.7,             // telegraph duration — the must-jump cue
@@ -222,7 +222,7 @@ export const CONFIG = {
     SLAM_RECOVER: 0.55,
     ENRAGE_AT: 0.5,               // hp fraction that triggers phase 2 + minions
     ENRAGE_SUMMONS: 2,            // grunts spawned on enrage
-    ENRAGE_SUMMONS_KIND: { slammer: 'grunt', caster: 'leaper' }, // caster's adds punish jump-dodging
+    ENRAGE_SUMMONS_KIND: { slammer: 'grunt', caster: 'leaper', juggernaut: 'brute' }, // caster's adds punish jump-dodging; juggernaut's adds pin you down
     SHOCKWAVE_SPEED: 430,
     SHOCKWAVE_LIFE: 2.6,
     SHOCKWAVE_DAMAGE: 12,
@@ -242,6 +242,24 @@ export const CONFIG = {
       SPREAD: 150,                // px horizontal spread, centered on the player
       PROJECTILE_DMG: 11,
       RANGE: 760,                 // max range to start a barrage
+    },
+    // ---- Boss variant C: "The Juggernaut" — a charging bulwark that cycles
+    // third (boss-index 3, 6, 9... = wave 15, 30, 45). Its special is a
+    // telegraphed full-arena CHARGE: it locks onto the player's standoff, winds
+    // up, then dashes across the whole arena with super-armor and a tall
+    // hitbox. The counter is to JUMP over the dash (a single read) or be at
+    // the opposite end — distinct from the slammer's repeated shockwaves (jump
+    // each wave) and the caster's barrage (dodge sideways). Recover at the wall
+    // is the punish window. Reuses the super-armor + enrage + kill-payoff infra.
+    CHARGE: {
+      WINDUP: 0.70,               // telegraph (glow ramps; the must-jump cue)
+      SPEED: 720,                 // horizontal dash velocity (commits straight)
+      MAX_TIME: 1.10,             // hard cap on dash duration (safety)
+      RECOVER: 0.85,              // vulnerable pause after hitting a wall
+      INTERVAL: 3.0,              // seconds between charges (phase 1)
+      INTERVAL_ENRAGED: 2.0,      // phase 2 (<=50% hp)
+      DAMAGE: 16,                 // contact damage if the dash connects
+      RANGE: 760,                 // max range to start a charge
     },
   },
 
@@ -266,6 +284,10 @@ export const CONFIG = {
       FIRE_LIFE: 3.2,          // how long the fire lingers
       FIRE_DPS: 26,            // damage/sec to anything standing in it
       FIRE_DMG_PLAYER: 14,     // contact hit on the player from the blast itself
+      // friendly-fire cap: a baited bomber can clutch-kill a few enemies (the
+      // fun emergent play) but can no longer wipe a whole wave by itself, which
+      // review feedback called an exploit. Hard cap on chain hits per blast.
+      CHAIN_MAX: 3,
     },
     // ranger — kites and lobs projectiles; forces the player to close distance.
     RANGER: {
@@ -307,6 +329,11 @@ export const CONFIG = {
     // adds don't multiply) and creates emergent crowd pressure. Standard melee.
     SPLITTER: {
       SPAWN_COUNT: 2,            // mini-grunts produced on death
+      // crowd cap: if spawnlings are already plentiful, a fresh split produces
+      // fewer (down to zero) so a chain of splitter deaths can't spiral into an
+      // unfair crowd ("cleared two and suddenly there were five"). Soft cap on
+      // simultaneous spawnlings.
+      MAX_SIMULT: 4,
     },
     // spawnling — the weak, fast mini-grunt produced by a splitter death.
     SPAWNLING: {

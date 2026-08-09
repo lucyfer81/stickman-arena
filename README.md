@@ -37,10 +37,12 @@ The site is fully static with all relative paths + a `.nojekyll` file, so it wor
 ## Features
 
 - **Procedural everything** — stickmen drawn from a skeletal rig (no sprites); all animation is math-driven (idle breathe, run cycle, jump tuck, punch/kick extension, hurt, death ragdoll). Audio is synthesized with WebAudio (no audio files). Background is generated (gradient sky, parallax skyline, moon glow, perspective floor grid, drifting embers).
-- **3 enemy types** — grunt (balanced), runner (fast/fragile), brute (tank) — with pursuit + attack AI and telegraphs.
+- **3 enemy types** — grunt (balanced), runner (fast/fragile), brute (tank) — with pursuit + attack AI and telegraphs. Later waves add shielders, bombers, rangers, chargers, medics, and splitters, each demanding a different answer.
+- **3 bosses** — The Slammer (jump the shockwaves), The Oracle (dodge the barrage), and The Juggernaut (jump the charge) — cycling every 5th wave so every climax is a different duel.
 - **Wave progression** with scaling difficulty and between-wave breaks.
 - **Game feel** — hit-pause (freeze frames), screen shake, particle bursts, hit sparks, floating combo/score text, kill slow-motion, landing dust, squash feel, enemy hurt-flash + knockback.
-- **Full loop** — title screen → gameplay → game over → restart, with persistent high score (`localStorage`).
+- **Full loop** — title screen → gameplay → game over → restart, with persistent high score (`localStorage`). Quick-retry drops straight back into a run; `T` returns to the menu.
+- **Meta-progression** — 10 unlockable skins tied to playstyle goals (waves, combos, mercies, overdrives, boss kills, comebacks), career stats, and a daily challenge.
 - **Responsive** — Phaser FIT scaling; portrait phones get a friendly "rotate device" hint.
 
 ## Project structure

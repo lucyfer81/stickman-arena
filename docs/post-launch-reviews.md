@@ -679,3 +679,26 @@ The review-driven loop continues: the next batch of reviews (post-options) is
 expected to migrate toward the next never-fixed cluster (mobile layout / Second
 Wind onboarding / meta depth), per the fix-order heuristic.
 
+---
+
+# Round 3c — remaining clusters fixed (all of them)
+
+A follow-up pass addressed **every other complaint cluster** from the Round-3
+audit, not just the #1/#2 above:
+
+| Cluster | Fix |
+|---|---|
+| #3 Mobile (taps feel lost) | `navigator.vibrate` haptics on K.O./hurt/boss/overdrive/second-wind, gated by a HAPTICS toggle in the options menu (on by default; no-op on desktop). |
+| #4 Difficulty (flat then boss wall) | Smoother mid-game ramp: waves 1-2 stay gentle (teaching), waves 3-4 aggression climbs faster (`midBump`), so the boss isn't a sudden wall. |
+| #5 Second Wind / MERCY confusing | First-time-ever (localStorage flag) teaching banners spell out the goal + controls (SPARE key reads the live binding); veterans keep the terse prompt. |
+| #6 Balance (bomber clears waves / splitter spiral) | Bomber friendly-fire chain capped at 3 per blast (still clutch, no solo clear); splitter spawnlings capped at 4 simultaneous (no spiral). |
+| #7 Repetitive / more bosses | Third boss **The Juggernaut** (telegraphed full-arena charge you must jump) cycling every 3rd boss wave; enrage summons brutes. |
+| #8 Meta-progression thin | 4 new long-haul skins tied to playstyle goals (spare 5 / overdrive 15 / kill 3 bosses / reform 2), with new persistent stat tracking. |
+| #9 Restart UX | Quick-retry: R / SPACE / ENTER / tap drops straight into a new run (same settings); T goes to the menu. |
+
+Verified: new `tests/roundc.spec.js` (7/7), official CI 5/5, and the modified
+`options`/`bossvariety`/`meta`/`retention`/`variety` suites all green (57 tests,
+zero regressions). Also fixed a UIScene teardown race exposed by quick-retry
+(`setColor` on a half-destroyed lazy Text) with a `label.scene` guard.
+
+

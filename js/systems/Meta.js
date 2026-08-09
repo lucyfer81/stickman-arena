@@ -42,10 +42,36 @@ const SKINS = {
     palette: { limb: 0xffd23f, joint: 0xffea99, head: 0xfff5cc, accent: 0xff9b00, fist: 0xffffff },
     unlock: { type: 'combo', value: 20, desc: 'hit a x20 combo' },
   },
+  // Long-term goals (Round C meta-depth): the launch skins cover the first few
+  // runs; these four extend the grind across many sessions — each tied to a
+  // distinct playstyle achievement (mercy / overdrive / boss / comeback), so
+  // there's always another reason to open the game tomorrow.
+  pacifist: {
+    label: 'PACIFIST',
+    palette: { limb: 0xeaf4ff, joint: 0xffffff, head: 0xffffff, accent: 0xbfe3ff, fist: 0xffffff },
+    unlock: { type: 'mercy', value: 5, desc: 'spare 5 enemies' },
+  },
+  surge: {
+    label: 'SURGE',
+    palette: { limb: 0x4fd4ff, joint: 0xb8ecff, head: 0xeafaff, accent: 0x2aa8ff, fist: 0xffe26b },
+    unlock: { type: 'bursts', value: 15, desc: 'unleash 15 OVERDRIVEs' },
+  },
+  slayer: {
+    label: 'SLAYER',
+    palette: { limb: 0xff3b30, joint: 0xff8a7a, head: 0xffd2c9, accent: 0xb30000, fist: 0xffd23f },
+    unlock: { type: 'bosskills', value: 3, desc: 'defeat 3 bosses' },
+  },
+  phoenix: {
+    label: 'PHOENIX',
+    palette: { limb: 0xff8a3d, joint: 0xffe26b, head: 0xfff0c8, accent: 0xff3b30, fist: 0xffe26b },
+    unlock: { type: 'reforms', value: 2, desc: 'REFORM 2 times' },
+  },
 };
 
 const DEFAULT_STATS = {
   totalKills: 0, gamesPlayed: 0, bestWave: 0, bestCombo: 0, bestScore: 0, totalScore: 0,
+  // Round C meta-depth: long-term counters that feed the new unlock goals.
+  totalMercy: 0, totalBursts: 0, totalBossKills: 0, totalReforms: 0,
 };
 
 function safeParse(raw, fallback) {
@@ -71,6 +97,11 @@ export const Meta = {
     s.bestCombo = Math.max(s.bestCombo, result.bestCombo || 0);
     s.bestScore = Math.max(s.bestScore, result.score || 0);
     s.totalScore += result.score || 0;
+    // Round C meta-depth accumulators
+    s.totalMercy += result.mercySpares || 0;
+    s.totalBursts += result.bursts || 0;
+    s.totalBossKills += result.bossKills || 0;
+    s.totalReforms += result.reforms || 0;
     const before = this.unlockedSkins(this.loadStats());
     this.saveStats(s);
     // re-check unlocks using the freshly saved bests (bestScore/bestCombo/wave)
@@ -100,6 +131,11 @@ export const Meta = {
       case 'kills': return stats.totalKills >= u.value;
       case 'score': return stats.bestScore >= u.value;
       case 'combo': return stats.bestCombo >= u.value;
+      // Round C meta-depth: playstyle-goal unlocks
+      case 'mercy': return (stats.totalMercy || 0) >= u.value;
+      case 'bursts': return (stats.totalBursts || 0) >= u.value;
+      case 'bosskills': return (stats.totalBossKills || 0) >= u.value;
+      case 'reforms': return (stats.totalReforms || 0) >= u.value;
       default: return false;
     }
   },
@@ -126,7 +162,9 @@ export const Meta = {
   // bootstraps the meta loop within a single short session.
   nextUnlock(stats) {
     stats = stats || this.loadStats();
-    const ORDER = ['rookie', 'ember', 'toxic', 'gold', 'royal'];
+    // Display order: early goals first (rookie/ember), then the playstyle
+    // achievements (mercy/burst/boss), then the deeper grinds (toxic/gold/reform).
+    const ORDER = ['rookie', 'ember', 'pacifist', 'surge', 'slayer', 'toxic', 'gold', 'phoenix', 'royal'];
     for (const key of ORDER) {
       if (this.isSkinUnlocked(key, stats)) continue;
       const u = SKINS[key].unlock;
@@ -137,6 +175,10 @@ export const Meta = {
         case 'kills': current = stats.totalKills; text = u.value + ' kills'; break;
         case 'combo': current = stats.bestCombo;  text = 'x' + u.value + ' combo'; break;
         case 'score': current = stats.bestScore;  text = 'score ' + u.value; break;
+        case 'mercy': current = stats.totalMercy || 0; text = u.value + ' mercies'; break;
+        case 'bursts': current = stats.totalBursts || 0; text = u.value + ' overdrives'; break;
+        case 'bosskills': current = stats.totalBossKills || 0; text = u.value + ' bosses'; break;
+        case 'reforms': current = stats.totalReforms || 0; text = u.value + ' reforms'; break;
         default: continue;
       }
       return {
