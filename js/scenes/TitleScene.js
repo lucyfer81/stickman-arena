@@ -9,7 +9,7 @@ export class TitleScene extends Phaser.Scene {
   constructor() { super('Title'); }
 
   create() {
-    drawBackground(this);
+    drawBackground(this, { skipForeground: true });
     this.audio = this.registry.get('audio');
     // generative soundtrack: a calm bed on the title (becomes audible once the
     // first gesture resumes the audio context), crossfading to combat on start.
