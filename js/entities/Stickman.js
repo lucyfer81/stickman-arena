@@ -128,6 +128,38 @@ function hurtPose(t) {
   };
 }
 
+// SURRENDER pose — the genre-subversion beat. A kneeling figure with hands
+// raised (the universal "I give up" silhouette). `p` interpolates from
+// kneeling-begging (0) to a standing bow (1) so the same pose function covers
+// the wait and the spare-bow phases. Tremble is a fast sine on the hands so
+// the begging reads as fearful, not static.
+function surrenderPose(t, p) {
+  const beg = 1 - p;            // 1 while kneeling, 0 after the bow
+  const bow = p;                // 0 while kneeling, 1 at full bow
+  const tremble = Math.sin(t * 20) * 1.1 * beg;
+  const hipY  = lerp(HIP_Y, 22, beg);   // hips drop near the ground
+  const neckY = lerp(NECK_Y, 72, beg);
+  const headY = lerp(HEAD_Y, 90, beg);
+  // arms UP and slightly FORWARD — hands above the head in supplication
+  const armFwd = beg * 16;
+  const handY  = neckY + 32;            // hands above the (lowered) head
+  const elbowY = neckY + 14;
+  return {
+    hip:   { x: tremble, y: hipY },
+    neck:  { x: 4, y: neckY },
+    head:  { x: lerp(6, 0, beg) - bow * 8, y: headY + bow * 6 }, // bow forward when spared
+    elbowR:{ x: 12 + armFwd, y: elbowY },
+    handR: { x: 16 + armFwd, y: handY + tremble },
+    elbowL:{ x: -8 - armFwd * 0.5, y: elbowY },
+    handL: { x: -12 - armFwd * 0.5, y: handY + tremble },
+    // kneeling: right knee planted low, left foot tucked
+    kneeR: { x: 12, y: lerp(26, 6, beg) },
+    footR: { x: 18, y: 0 },
+    kneeL: { x: -8, y: lerp(26, 20, beg) },
+    footL: { x: -14, y: 0 },
+  };
+}
+
 function rotateAround(p, cx, cy, ang) {
   const c = Math.cos(ang);
   const s = Math.sin(ang);
@@ -146,6 +178,7 @@ export function computePose(anim) {
     case 'punch': pose = punchPose(phase); break;
     case 'kick': pose = kickPose(phase); break;
     case 'hurt': pose = hurtPose(time); break;
+    case 'surrender': pose = surrenderPose(time, phase); break;
     case 'dead':
       pose = idlePose(time);
       break;

@@ -41,6 +41,7 @@ module.exports = defineConfig({
     project('firstminute', /firstminute\.spec\.js/,   90000),
     project('laststand',   /laststand\.spec\.js/,    90000),
     project('magnet',      /magnet\.spec\.js/,        60000),
+    project('mercy',       /mercy\.spec\.js/,         90000),
     project('meta',        /meta\.spec\.js/,         60000),
     project('music',       /music\.spec\.js/,         60000),
     project('onboard',     /onboard\.spec\.js/,      60000),

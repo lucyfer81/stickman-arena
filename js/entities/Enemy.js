@@ -154,6 +154,15 @@ export class Enemy extends Stickman {
     // medic support state — channels a heal pulse to the lowest-HP nearby ally.
     this.heal = null;      // { phase: 'windup'|'recover', t, target }
     this.healCd = this.variant === 'medic' ? rand(2.0, 3.5) : 0;
+    // MERCY 「The Coward's End」 — the last living enemy of a non-boss wave may
+    // surrender (kneel + white flag) and let the player choose spare/kill/ignore.
+    // phases: 'kneel' (transition in) -> 'wait' (choice window) -> 'bow' (spared)
+    // -> 'depart' (walking off) -> 'flee' (running off). The scene owns trigger
+    // gating + the spare/kill payoff; the enemy owns pose/movement/flag drawing.
+    this.surrender = null;
+    this.departed = false;     // true once it has been spared or is fleeing: the
+                               // wave-clear filter excludes it so the exit anim
+                               // plays during the between-wave break, not before
   }
 
   bodyBox() {
@@ -164,8 +173,24 @@ export class Enemy extends Stickman {
     return { x: this.x - 26 * s, y: this.y - NECK * s - 10, w: 52 * s, h: NECK * s + 10 };
   }
 
+  // MERCY: a spared / fleeing enemy is invulnerable to ALL damage paths (melee,
+  // Overdrive AoE) so its exit animation plays untouched. The kneel/wait window
+  // stays hittable (the KILL choice). Centralized here so combat + burst agree.
+  isHittable() {
+    if (this.dead) return false;
+    if (this.surrender && (this.surrender.phase === 'bow' || this.surrender.phase === 'depart' || this.surrender.phase === 'flee')) return false;
+    return true;
+  }
+
   takeHit(dmg, fromX, kb, pause) {
     if (this.dead) return false;
+    // MERCY: once the enemy has been SPARED (bow/depart) or is fleeing, it's
+    // invulnerable — the player already made their choice; the exit animation
+    // plays out untouched. Only the kneel/wait window can still be ended by an
+    // attack (the KILL path).
+    if (this.surrender && (this.surrender.phase === 'bow' || this.surrender.phase === 'depart' || this.surrender.phase === 'flee')) {
+      return false;
+    }
     const heavy = kb > 400; // kick (heavy) is the universal interrupt — skill reward
 
     // SHIELDER GUARD: a raised frontal shield nullifies light hits from the
@@ -437,8 +462,84 @@ export class Enemy extends Stickman {
     }
   }
 
+  // ---- MERCY surrender ----
+  // The scene calls this once trigger conditions are met. The enemy drops into
+  // a kneeling beg over KNEEL_TIME, then holds the WAIT window for the scene's
+  // spare/kill decision; if neither comes, the scene calls _flee().
+  _startSurrender() {
+    const M = CONFIG.MERCY;
+    this.surrender = { phase: 'kneel', t: 0, p: 0 };
+    this.attack = null; this.glow = 0;
+    this.passive = true; // suppress melee AI; surrendered enemies never swing
+    this.vx *= 0.4;
+    if (this.scene._onSurrenderStart) this.scene._onSurrenderStart(this);
+  }
+
+  _progressSurrender(dt) {
+    const a = this.surrender;
+    const M = CONFIG.MERCY;
+    a.t += dt;
+    // plant feet: kill residual velocity so the kneel reads as a committed stop
+    this.vx *= clamp01(1 - 10 * dt);
+    if (a.phase === 'kneel') {
+      // ease the pose parameter 0 -> 1 over KNEEL_TIME (kneeling-in)
+      a.p = clamp01(a.t / M.KNEEL_TIME);
+      if (a.t >= M.KNEEL_TIME) { a.phase = 'wait'; a.t = 0; a.p = 0; }
+    } else if (a.phase === 'wait') {
+      a.p = 0; // begging silhouette holds; tremble is procedural in the pose
+      // wait window is owned by the scene (it knows spare/kill/flee); here we
+      // only animate the held kneel. The scene expires the window and calls
+      // _bow() / _flee().
+    } else if (a.phase === 'bow') {
+      a.p = clamp01(a.t / M.BOW_TIME); // 0 -> 1 raises the body to a standing bow
+      if (a.t >= M.BOW_TIME) { a.phase = 'depart'; a.t = 0; a.p = 1; }
+    } else if (a.phase === 'depart') {
+      // walk off-screen at a brisk pace (spared). Faces nearest world edge.
+      // NOTE: departed is NOT set here — the wave-clear filter still counts
+      // this enemy as alive so the wave doesn't end until the spared enemy
+      // has actually left (lets the MERCY banner breathe before WAVE CLEAR).
+      a.p = 1;
+      const dir = (this.x < (CONFIG.WALL_LEFT + CONFIG.WALL_RIGHT) / 2) ? -1 : 1;
+      this.facing = dir;
+      this.vx += (dir * 460 - this.vx) * clamp01(6 * dt);
+      if (this.x <= CONFIG.WALL_LEFT - 60 || this.x >= CONFIG.WALL_RIGHT + 60) {
+        this._destroy();
+      }
+    } else if (a.phase === 'flee') {
+      // run off-screen fast (window expired). Arms up, full sprint.
+      a.p = 1;
+      const dir = (this.x < (CONFIG.WALL_LEFT + CONFIG.WALL_RIGHT) / 2) ? -1 : 1;
+      this.facing = dir;
+      this.vx = dir * M.FLEE_SPEED;
+      if (this.x <= CONFIG.WALL_LEFT - 60 || this.x >= CONFIG.WALL_RIGHT + 60) {
+        this._destroy();
+      }
+    }
+    this._physics(dt);
+    this._render();
+  }
+
+  // scene hooks for the spared / flee transitions
+  _bow() {
+    if (!this.surrender) return;
+    this.surrender.phase = 'bow';
+    this.surrender.t = 0;
+    this.surrender.p = 0;
+    // departed stays false: the wave-clear filter still counts this enemy so
+    // the MERCY banner gets to breathe before the WAVE CLEAR beat. It clears
+    // when the enemy actually walks off-screen and is destroyed.
+  }
+  _flee() {
+    if (!this.surrender) return;
+    this.surrender.phase = 'flee';
+    this.surrender.t = 0;
+    this.departed = true; // the player ignored — end the wave immediately while it sprints off
+  }
+
   getHitbox(player) {
     if (this.dead) return null;
+    // a surrendered enemy never damages the player — it's kneeling, hands up.
+    if (this.surrender) return null;
     // hitbox geometry uses the BASE scale (combat-stable through squash frames;
     // a squashed attacker mustn't get a shifted swing arc).
     const sc = this._baseScaleX || this.scale || 1;
@@ -478,6 +579,14 @@ export class Enemy extends Stickman {
       this._alpha = clamp01(1 - (this.deadT - 0.6) * 2.5);
       this._render();
       if (this.deadT >= 1) this._destroy();
+      return;
+    }
+
+    // MERCY: a surrendered enemy only runs its surrender state machine — it
+    // never attacks, never path-finds, never triggers boss/slam/fuse logic.
+    // Takes priority over every other action state once entered.
+    if (this.surrender) {
+      this._progressSurrender(dt);
       return;
     }
 
@@ -992,6 +1101,15 @@ export class Enemy extends Stickman {
     let anim;
     if (this.dead) {
       anim = { state: 'dead', time: this.animTime, deadT: this.deadT };
+    } else if (this.surrender) {
+      // MERCY: kneeling-beg (p=0) -> standing bow (p=1). The pose function
+      // interpolates the whole body; tremble is procedural. Fleeing reads as a
+      // run cycle so the exit has motion.
+      if (this.surrender.phase === 'flee') {
+        anim = { state: 'run', time: this.animTime };
+      } else {
+        anim = { state: 'surrender', time: this.animTime, phase: this.surrender.p };
+      }
     } else if (this.slam) {
       // boss slam: windup reads as a charging punch, the leap as an airborne
       // tuck, recover as settling idle — so each phase is instantly legible.
@@ -1032,6 +1150,41 @@ export class Enemy extends Stickman {
     // reads the shield / volatile core at a glance. Drawn in graphics coords
     // (feet at origin, +x right, facing applied manually since Graphics isn't rotated).
     if (!this.dead) {
+      // MERCY overlays — drawn FIRST so the body sits on top of the spotlight
+      // pool. A soft white light beneath the kneeler sells the "moment of
+      // decision", and the white flag is the universal surrender symbol. The
+      // flag waves on a slow sine while waiting, droops during the bow, and is
+      // gone once departed/fleeing.
+      if (this.surrender && (this.surrender.phase === 'kneel' || this.surrender.phase === 'wait' || this.surrender.phase === 'bow')) {
+        // ground spotlight pool (additive-feeling soft disc under the feet)
+        const poolA = 0.28 * (this.surrender.phase === 'bow' ? 1 - this.surrender.p : 1);
+        this.fillStyle(0xeaf4ff, poolA * 0.5);
+        this.fillEllipse(0, 2 * this.scale, 70 * this.scale, 20 * this.scale);
+        this.fillStyle(0xffffff, poolA * 0.35);
+        this.fillEllipse(0, 2 * this.scale, 44 * this.scale, 13 * this.scale);
+        // white flag on a pole, held up to the facing side
+        const flagUp = this.surrender.phase === 'bow' ? (1 - this.surrender.p) : 1;
+        const poleX = this.facing * (20 * this.scale);
+        const poleTopY = -(150 + 10 * Math.sin(this.animTime * 4)) * this.scale * flagUp - 30 * this.scale * (1 - flagUp);
+        const poleBotY = -70 * this.scale;
+        this.lineStyle(2.5 * this.scale, 0x05070d, 0.9);
+        this.strokeLineShape(new Phaser.Geom.Line(poleX, poleBotY, poleX, poleTopY));
+        this.lineStyle(2 * this.scale, 0xbfe3ff, 0.95);
+        this.strokeLineShape(new Phaser.Geom.Line(poleX, poleBotY, poleX, poleTopY));
+        // the cloth (waves via a horizontal sine offset)
+        const fw = 26 * this.scale, fh = 18 * this.scale;
+        const wave = Math.sin(this.animTime * 6) * 3 * this.scale * flagUp;
+        this.fillStyle(0xeaf4ff, 0.95);
+        this.beginPath();
+        this.moveTo(poleX, poleTopY);
+        this.lineTo(poleX + this.facing * fw + wave, poleTopY + fh * 0.3);
+        this.lineTo(poleX + this.facing * fw + wave * 0.7, poleTopY + fh);
+        this.lineTo(poleX, poleTopY + fh);
+        this.closePath();
+        this.fillPath();
+        this.lineStyle(1.5, 0xffffff, 0.7);
+        this.strokePath();
+      }
       if (this.variant === 'shielder') {
         const up = this.guardBroken <= 0;
         const sx = this.facing * 30 * this.scale;
