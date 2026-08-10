@@ -126,4 +126,43 @@ test.describe('Pickup magnet (resource loop fix)', () => {
     expect(after.hp).toBeGreaterThan(1);
     expect(errors).toEqual([]);
   });
+
+  test('a drop does NOT home toward a dead player (no magnet into the void)', async ({ page }) => {
+    test.setTimeout(60000);
+    const errors = [];
+    page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+    page.on('pageerror', (e) => errors.push(String(e && e.stack || e)));
+    await startGame(page);
+
+    // kill the player, then drop health within the magnet range. The sticky
+    // homing flag used to never reset, so the drop flew toward the corpse
+    // during the death fade ("magnet into the void"). It must now just fall.
+    await page.evaluate(() => {
+      const s = window.__game.scene.getScene('Game');
+      window.__test.clearEnemies();
+      s.player.die();
+    });
+    const px = await page.evaluate(() => window.__game.scene.getScene('Game').player.x);
+    await page.evaluate((x) => window.__test.dropPickup('health', x + 100), px);
+    // step the drop a few times — it should fall to the ground, NOT home in
+    await page.waitForTimeout(600);
+    const after = await page.evaluate(() => {
+      const s = window.__game.scene.getScene('Game');
+      const p = s.pickups[0];
+      return {
+        present: s.pickups.length,
+        homing: p ? !!p.homing : null,
+        onGround: p ? !!p.onGround : null,
+        collected: p ? !!p._collected : null,
+        // the drop x should stay near where it was dropped, not sucked to player x
+        dx: p ? Math.abs(p.x - (s.player.x + 100)) : null,
+      };
+    });
+    expect(after.present).toBe(1);
+    // the core fix: a dead player releases the magnet lock and can't collect,
+    // so the drop is neither homing nor absorbed (it just falls naturally).
+    expect(after.homing).toBe(false);
+    expect(after.collected).toBe(false);
+    expect(errors).toEqual([]);
+  });
 });

@@ -176,7 +176,13 @@ export class Player extends Stickman {
       this._physics(dt, false);
       this._alpha = clamp01(1 - (this.deadT - 0.7) * 2) * (this.invuln > 0 ? 0.5 : 1);
       this.tickStretch(dt);
-      this._render();
+      // Once the corpse has fully faded there's nothing to see — stop issuing
+      // the per-frame draw calls (every fill uses _alpha, so at 0 they're
+      // invisible but still cost CPU/GPU). Clear once so no stale geometry
+      // lingers, then idle until the scene transition. (Enemy._die destroys at
+      // deadT>=1; the player is kept alive for scene/x references.)
+      if (this._alpha > 0.001) this._render();
+      else if (!this._clearedAfterDeath) { this.clear(); this._clearedAfterDeath = true; }
       return;
     }
 

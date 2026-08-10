@@ -34,6 +34,11 @@ export class Pickup extends Phaser.GameObjects.Graphics {
     this.life -= dt;
     if (this.life <= 0) { this._destroy(); return; }
 
+    // A dead player can't collect — and drops shouldn't home toward a corpse
+    // (the old sticky homing flag never reset, so pickups flew into the void
+    // during the death fade). Release the lock so the drop just falls.
+    if (player.dead) this.homing = false;
+
     const pdx = this.x - player.x;
     const pdy = this.y - (player.y - 60);
     const pdist = Math.hypot(pdx, pdy);
@@ -45,7 +50,7 @@ export class Pickup extends Phaser.GameObjects.Graphics {
     // so the spawn pop is killed instantly and the drop zips in — feels like a
     // lock-on, and the homing flag is sticky so it never flickers at the edge.
     const M = CONFIG.CONTENT.PICKUP;
-    if (!this.homing && pdist < M.MAGNET_RANGE) this.homing = true;
+    if (!this.homing && !player.dead && pdist < M.MAGNET_RANGE) this.homing = true;
     if (this.homing) {
       const inv = 1 / (pdist || 1);
       const desVx = -pdx * inv * M.MAGNET_SPEED;
@@ -65,12 +70,14 @@ export class Pickup extends Phaser.GameObjects.Graphics {
       if (this.x > CONFIG.WALL_RIGHT) this.x = CONFIG.WALL_RIGHT;
     }
 
-    // collect (fresh coords after movement)
-    const dx = this.x - player.x;
-    const dy = this.y - (player.y - 60);
-    if (Math.abs(dx) < 46 && Math.abs(dy) < 80) {
-      this.dead = true;
-      this._collected = true;
+    // collect (fresh coords after movement) — a dead player can't pick up
+    if (!player.dead) {
+      const dx = this.x - player.x;
+      const dy = this.y - (player.y - 60);
+      if (Math.abs(dx) < 46 && Math.abs(dy) < 80) {
+        this.dead = true;
+        this._collected = true;
+      }
     }
 
     // draw — type-specific silhouette so the player can read the drop at a glance
