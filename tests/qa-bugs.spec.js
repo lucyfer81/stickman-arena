@@ -143,6 +143,135 @@ test.describe('QA bug regressions', () => {
     expect(r.dashVx).not.toBe(r.chargerSpeed);
     expect(errors).toEqual([]);
   });
+
+  test('Bug F1: juggernaut boss spawns with a charge grace period (not 0)', async ({ page }) => {
+    test.setTimeout(25000);
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await startGame(page);
+    const r = await page.evaluate(() => {
+      const s = window.__game.scene.getScene('Game');
+      // spawn a juggernaut fresh and read its constructor-set chargeCd BEFORE
+      // any update tick. The old double-init overwrote the 2.5s grace with 0,
+      // so the boss charged on frame 1 with no telegraph.
+      window.__test.clearEnemies();
+      const kind = window.__test.spawnBossKind('juggernaut');
+      const b = s.boss;
+      return {
+        kind,
+        chargeCdAtSpawn: b.chargeCd,
+        // slam/cast keep their grace — charge must too (parity)
+        slamCdAtSpawn: b.slamCd,
+        castCdAtSpawn: b.castCd,
+      };
+    });
+    expect(r.kind).toBe('juggernaut');
+    // the grace is 2.5s — must be > 0 so the windup telegraph can play
+    expect(r.chargeCdAtSpawn, 'juggernaut chargeCd must have a grace (>0) at spawn').toBeGreaterThan(0);
+    expect(r.chargeCdAtSpawn).toBeGreaterThanOrEqual(2.0);
+    // charger variant (non-boss) still gets its randomized cd, not the boss grace
+    const r2 = await page.evaluate(() => {
+      window.__test.clearEnemies();
+      const e = window.__test.spawnVariant('charger', 320);
+      return { variant: e.variant, isBoss: e.isBoss, chargeCd: e.chargeCd };
+    });
+    expect(r2.isBoss).toBe(false);
+    expect(r2.chargeCd, 'non-boss charger keeps randomized cd').toBeGreaterThan(0);
+    expect(errors).toEqual([]);
+  });
+
+  test('Bug F2: heavy hit cannot interrupt a committed boss special (super-armor)', async ({ page }) => {
+    test.setTimeout(25000);
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await startGame(page);
+    const r = await page.evaluate(() => {
+      const s = window.__game.scene.getScene('Game');
+      const C = window.__config;
+      window.__test.clearEnemies();
+      window.__test.spawnBossKind('slammer');
+      const b = s.boss;
+      b.slamCd = 0;
+      const player = s.player;
+      // step through windup into the committed leap phase
+      let inLeap = false;
+      for (let i = 0; i < 80; i++) {
+        b.update(0.03, player);
+        if (b.slam && b.slam.phase === 'leap') { inLeap = true; break; }
+      }
+      if (!inLeap) return { error: 'never reached leap' };
+      const hpBefore = b.health;
+      const vyBeforeLeap = b.vy;
+      const slamBefore = b.slam ? b.slam.phase : null;
+      // now land a HEAVY kick (kb > 400) mid-leap — armor must hold
+      b.takeHit(20, b.x - 200, 560, 0.085);
+      return {
+        inLeap,
+        hpBefore, hpAfter: b.health,
+        damageApplied: b.health < hpBefore,
+        // armor: NOT flinched
+        stateAfter: b.state,
+        notHurt: b.state !== 'hurt',
+        // armor: slam state survives (no leak)
+        slamAfter: b.slam ? b.slam.phase : null,
+        slamSurvived: !!b.slam,
+        // armor: vy NOT overwritten to -200 (leap arc preserved)
+        vyAfter: b.vy,
+        vyPreserved: Math.abs(b.vy - vyBeforeLeap) < 1,
+      };
+    });
+    expect(r.inLeap, 'reached committed leap phase').toBe(true);
+    expect(r.damageApplied, 'damage still applies through armor').toBe(true);
+    expect(r.notHurt, 'committed boss does not enter hurt state from a kick').toBe(true);
+    expect(r.slamSurvived, 'slam state survives a heavy hit (no leak)').toBe(true);
+    expect(r.slamAfter).toBe('leap');
+    expect(r.vyPreserved, 'leap arc vy preserved (not warped to -200)').toBe(true);
+    expect(errors).toEqual([]);
+  });
+
+  test('Bug F5: slam windup decelerates at single rate (no double friction)', async ({ page }) => {
+    test.setTimeout(25000);
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await startGame(page);
+    const r = await page.evaluate(() => {
+      const s = window.__game.scene.getScene('Game');
+      window.__test.clearEnemies();
+      window.__test.spawnBossKind('slammer');
+      const b = s.boss;
+      b.slamCd = 0;
+      const player = s.player;
+      // step into the windup phase
+      let inWindup = false;
+      for (let i = 0; i < 50; i++) {
+        b.update(0.03, player);
+        if (b.slam && b.slam.phase === 'windup') { inWindup = true; break; }
+      }
+      if (!inWindup) return { error: 'never reached windup' };
+      // give a known ground velocity and step ONCE with a fixed dt
+      b.vx = 400; b.onGround = true; b.y = window.__config.GROUND_Y;
+      const before = Math.abs(b.vx);
+      b.update(0.03, player);
+      const after = Math.abs(b.vx);
+      // _progressSlam windup damps once at rate 8: factor = clamp01(1-8*0.03) = 0.76
+      // Before the fix, _physics damped a SECOND time: 0.76 * 0.76 = 0.578
+      const singleRate = 1 - 8 * 0.03;        // 0.76
+      const doubleRate = singleRate * singleRate; // 0.578
+      return {
+        inWindup,
+        before, after,
+        ratio: after / before,
+        singleRate, doubleRate,
+        // the ratio should be near singleRate (0.76), nowhere near doubleRate (0.578)
+        isSingle: Math.abs((after / before) - singleRate) < 0.03,
+        isDouble: Math.abs((after / before) - doubleRate) < 0.03,
+      };
+    });
+    expect(r.inWindup, 'reached windup').toBe(true);
+    expect(r.isSingle, 'deceleration is single-rate (no stacked friction)').toBe(true);
+    expect(r.isDouble, 'must not be the old double-rate').toBe(false);
+    expect(errors).toEqual([]);
+  });
 });
 
 // local mirror of CONFIG.BOSS.NAME so the test file is self-contained

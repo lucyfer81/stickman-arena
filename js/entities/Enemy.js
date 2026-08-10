@@ -159,8 +159,13 @@ export class Enemy extends Stickman {
     this.throwCd = rand(1.0, 2.0);
     this.throw = null;     // { phase: 'windup'|'recover', t, windup }
     // charger dash state — a committed horizontal charge (mini boss-pattern).
-    this.charge = null;    // { phase: 'windup'|'dash'|'recover', t, dir }
-    this.chargeCd = this.variant === 'charger' ? rand(1.6, 3.0) : 0;
+    // NOTE: this.charge is already initialised above (line ~148) with the full
+    // schema { phase, t, dir, hit }. Only the non-boss CHARGER variant gets a
+    // randomized cooldown here — the boss (juggernaut) keeps the grace period
+    // set above so it doesn't charge on frame 1 with no telegraph.
+    if (this.variant === 'charger' && !this.isBoss) {
+      this.chargeCd = rand(1.6, 3.0);
+    }
     // medic support state — channels a heal pulse to the lowest-HP nearby ally.
     this.heal = null;      // { phase: 'windup'|'recover', t, target }
     this.healCd = this.variant === 'medic' ? rand(2.0, 3.5) : 0;
@@ -250,6 +255,24 @@ export class Enemy extends Stickman {
     // a kill always applies, regardless of armor
     if (this.health <= 0) { this._die(dir); return true; }
 
+    // BOSS super-armor: once a boss commits to its special (past the telegraph
+    // windup), it cannot be interrupted by anything short of death — not even a
+    // heavy kick. Damage still applies (subtracted above); only the flinch/
+    // knockback is suppressed. This MUST run before the heavy branch below,
+    // otherwise a kick breaks the commitment AND leaks the slam/cast/charge
+    // state (cleared attack but not the special) → 1-frame flinch then resume +
+    // vy=-200 warps the slam leap arc. For the slammer that's leap+recover; for
+    // the caster, barrage release+recover; for the juggernaut, the locked dash.
+    if (this.isBoss && this.slam && this.slam.phase !== 'windup') {
+      return true;
+    }
+    if (this.isBoss && this.cast && this.cast.phase !== 'windup') {
+      return true;
+    }
+    if (this.isBoss && this.charge && this.charge.phase === 'dash') {
+      return true;
+    }
+
     const phase = this.attack && this.attack.phase;
     if (heavy) {
       // heavy hits break anything except a kill — full knockback + flinch.
@@ -257,21 +280,6 @@ export class Enemy extends Stickman {
       this.attack = null; this.glow = 0;
       this.vx = dir * kb; this.vy = -200; this.onGround = false; this.facing = -dir;
       this.state = 'hurt'; this.hurtTime = 0;
-      return true;
-    }
-    // BOSS super-armor: once a boss commits to its special (past the telegraph
-    // windup), it cannot be interrupted by anything short of death. For the
-    // slammer that's the leap+recover; for the caster, the barrage release+
-    // recover. The telegraphed counter is to dodge the attack, not stagger it.
-    if (this.isBoss && this.slam && this.slam.phase !== 'windup') {
-      return true;
-    }
-    if (this.isBoss && this.cast && this.cast.phase !== 'windup') {
-      return true;
-    }
-    // JUGGERNAUT charge: once the dash locks in, it cannot be interrupted — the
-    // counter is to JUMP over it, not stagger it (mirrors slam/cast armor).
-    if (this.isBoss && this.charge && this.charge.phase === 'dash') {
       return true;
     }
     // CHARGER commitment: once the dash locks in, light hits can't shove it off
@@ -1197,8 +1205,13 @@ export class Enemy extends Stickman {
     } else {
       this.onGround = false;
     }
-    // friction on ground when not actively chasing handled in AI
-    if (this.onGround && (this.state === 'idle' || this.state === 'punch' || this.state === 'hurt')) {
+    // friction on ground when not actively chasing handled in AI. A committed
+    // boss/charger special (slam/cast/charge) manages its OWN vx damping inside
+    // its progress method, so skip the idle friction here — otherwise it stacks
+    // (double deceleration) and the boss skids to an unnatural dead stop during
+    // the windup telegraph and recover pause.
+    if (this.onGround && (this.state === 'idle' || this.state === 'punch' || this.state === 'hurt')
+        && !this.slam && !this.cast && !this.charge) {
       this.vx *= clamp01(1 - 8 * dt);
     }
     // resolve severe horizontal overlap with other living enemies (safety net)
