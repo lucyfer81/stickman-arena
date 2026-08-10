@@ -1205,8 +1205,13 @@ export class Enemy extends Stickman {
     } else {
       this.onGround = false;
     }
-    // friction on ground when not actively chasing handled in AI
-    if (this.onGround && (this.state === 'idle' || this.state === 'punch' || this.state === 'hurt')) {
+    // friction on ground when not actively chasing handled in AI. A committed
+    // boss/charger special (slam/cast/charge) manages its OWN vx damping inside
+    // its progress method, so skip the idle friction here — otherwise it stacks
+    // (double deceleration) and the boss skids to an unnatural dead stop during
+    // the windup telegraph and recover pause.
+    if (this.onGround && (this.state === 'idle' || this.state === 'punch' || this.state === 'hurt')
+        && !this.slam && !this.cast && !this.charge) {
       this.vx *= clamp01(1 - 8 * dt);
     }
     // resolve severe horizontal overlap with other living enemies (safety net)

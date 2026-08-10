@@ -228,6 +228,50 @@ test.describe('QA bug regressions', () => {
     expect(r.vyPreserved, 'leap arc vy preserved (not warped to -200)').toBe(true);
     expect(errors).toEqual([]);
   });
+
+  test('Bug F5: slam windup decelerates at single rate (no double friction)', async ({ page }) => {
+    test.setTimeout(25000);
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await startGame(page);
+    const r = await page.evaluate(() => {
+      const s = window.__game.scene.getScene('Game');
+      window.__test.clearEnemies();
+      window.__test.spawnBossKind('slammer');
+      const b = s.boss;
+      b.slamCd = 0;
+      const player = s.player;
+      // step into the windup phase
+      let inWindup = false;
+      for (let i = 0; i < 50; i++) {
+        b.update(0.03, player);
+        if (b.slam && b.slam.phase === 'windup') { inWindup = true; break; }
+      }
+      if (!inWindup) return { error: 'never reached windup' };
+      // give a known ground velocity and step ONCE with a fixed dt
+      b.vx = 400; b.onGround = true; b.y = window.__config.GROUND_Y;
+      const before = Math.abs(b.vx);
+      b.update(0.03, player);
+      const after = Math.abs(b.vx);
+      // _progressSlam windup damps once at rate 8: factor = clamp01(1-8*0.03) = 0.76
+      // Before the fix, _physics damped a SECOND time: 0.76 * 0.76 = 0.578
+      const singleRate = 1 - 8 * 0.03;        // 0.76
+      const doubleRate = singleRate * singleRate; // 0.578
+      return {
+        inWindup,
+        before, after,
+        ratio: after / before,
+        singleRate, doubleRate,
+        // the ratio should be near singleRate (0.76), nowhere near doubleRate (0.578)
+        isSingle: Math.abs((after / before) - singleRate) < 0.03,
+        isDouble: Math.abs((after / before) - doubleRate) < 0.03,
+      };
+    });
+    expect(r.inWindup, 'reached windup').toBe(true);
+    expect(r.isSingle, 'deceleration is single-rate (no stacked friction)').toBe(true);
+    expect(r.isDouble, 'must not be the old double-rate').toBe(false);
+    expect(errors).toEqual([]);
+  });
 });
 
 // local mirror of CONFIG.BOSS.NAME so the test file is self-contained
