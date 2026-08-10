@@ -116,37 +116,42 @@ test.describe('Round C — balance, boss, meta, retry, ramp', () => {
     await startGame(page);
     await page.evaluate(() => window.__test.spawnBossKind('juggernaut'));
     await page.waitForFunction(() => { const s = window.__game.scene.getScene('Game'); return s.boss && !s.boss.dead; }, null, { timeout: 6000 });
-    // park the boss + player within charge RANGE (760) so the special fires
-    await page.evaluate(() => {
+    // Deterministic: drive the boss update at a fixed step so the result doesn't
+    // depend on the (often low) headless framerate. Park boss/player in charge
+    // range, arm the special, then step until the dash resolves and confirm the
+    // grounded player in the lane took a contact hit.
+    const r = await page.evaluate(() => {
       const C = window.__config;
       const s = window.__game.scene.getScene('Game');
-      s.boss.x = C.WALL_LEFT + 40; s.player.x = 700; s.player.y = C.GROUND_Y;
+      const b = s.boss; const player = s.player;
+      b.x = C.WALL_LEFT + 40; b.onGround = true; b.chargeCd = 0;
+      player.x = 700; player.y = C.GROUND_Y; player.health = 100; player.invuln = 0;
+      const hitsBefore = s.hitsTaken || 0;
+      let phase = null, chargeSeen = false;
+      // BOSS.CHARGE.WINDUP(0.70) + dash across ~600px @720 + recover(0.85) fits in ~3s of step dt
+      for (let i = 0; i < 400; i++) {
+        b.update(0.03, player);
+        if (b.charge) phase = b.charge.phase;
+        if (phase === 'dash') chargeSeen = true;
+        // stop once the charge has fully resolved (back to null / boss idle)
+        if (chargeSeen && !b.charge) break;
+      }
+      const hitsAfter = s.hitsTaken || 0;
+      return { hitsBefore, hitsAfter, chargeSeen, finalBossX: Math.round(b.x) };
     });
-    const hitsBefore = await page.evaluate(() => window.__stickman.hitsTaken || 0);
-    // force the special; let it wind up + dash across. The grounded player in the
-    // lane should eat a contact hit.
-    let chargeSeen = false;
-    const dl = Date.now() + 6000;
-    while (Date.now() < dl) {
-      await page.evaluate(() => window.__test.bossFireSpecial());
-      const st = await page.evaluate(() => { const b = window.__game.scene.getScene('Game').boss; return b && b.charge ? b.charge.phase : null; });
-      if (st === 'dash') { chargeSeen = true; break; }
-      await page.waitForTimeout(120);
-    }
-    expect(chargeSeen, 'juggernaut should enter its dash phase').toBe(true);
-    await page.waitForTimeout(1400); // let the dash resolve across the arena
-    const hitsAfter = await page.evaluate(() => window.__stickman.hitsTaken || 0);
-    expect(hitsAfter, 'a grounded player in the charge lane gets hit').toBeGreaterThan(hitsBefore);
-    // enrage at 50% summons brutes (not grunts/leapers). The enrage check lives
-    // in the boss update loop, so setting health<50% + enraged=false is enough.
-    const beforeBrutes = await page.evaluate(() => window.__game.scene.getScene('Game').enemies.filter((e) => !e.dead && e.variant === 'brute').length);
-    await page.evaluate(() => {
+    expect(r.chargeSeen, 'juggernaut should enter and complete its dash').toBe(true);
+    expect(r.hitsAfter, 'a grounded player in the charge lane gets hit').toBeGreaterThan(r.hitsBefore);
+    // enrage at 50% summons brutes — also stepped deterministically
+    const er = await page.evaluate(() => {
       const s = window.__game.scene.getScene('Game');
-      const b = s.boss; if (b) { b.health = b.maxHealth * 0.4; b.enraged = false; b.charge = null; b.chargeCd = 2; }
+      const b = s.boss; if (!b) return null;
+      const before = s.enemies.filter((e) => !e.dead && e.variant === 'brute').length;
+      b.health = b.maxHealth * 0.4; b.enraged = false; b.charge = null; b.chargeCd = 2;
+      for (let i = 0; i < 60; i++) b.update(0.03, s.player);
+      const after = s.enemies.filter((e) => !e.dead && e.variant === 'brute').length;
+      return { before, after };
     });
-    await page.waitForTimeout(400);
-    const afterBrutes = await page.evaluate(() => window.__game.scene.getScene('Game').enemies.filter((e) => !e.dead && e.variant === 'brute').length);
-    expect(afterBrutes, 'juggernaut enrage summons brutes').toBeGreaterThan(beforeBrutes);
+    expect(er.after, 'juggernaut enrage summons brutes').toBeGreaterThan(er.before);
     expect(errors).toEqual([]);
   });
 

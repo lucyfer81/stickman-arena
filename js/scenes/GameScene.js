@@ -650,8 +650,12 @@ export class GameScene extends Phaser.Scene {
     if (this.isBossWave) {
       // boss wave: a single climactic elite — no filler spawns, no event remix.
       this.spawnQueue = 1;
-      const variant = (Math.round(n / CONFIG.BOSS.WAVE_EVERY) % 2 === 1) ? 'slammer' : 'caster';
-      const name = CONFIG.BOSS.NAME[variant];
+      // Boss archetype must match _spawnBoss exactly (the banner shows the name
+      // of the boss that will appear). Both sites use _bossKindForWave so wave
+      // 15+ cycles juggernaut correctly — the old 2-cycle here showed the wrong
+      // name from wave 15 onward.
+      const kind = this._bossKindForWave(n);
+      const name = CONFIG.BOSS.NAME[kind];
       this.ui.banner('BOSS WAVE ' + n + ' \u2014 ' + name, '#ff3b30');
       const SB = CONFIG.FEEL.SHAKE.BOSS_ENTRY;
       this._shake(SB.amp, SB.life, SB.freq, 0, 1);
@@ -800,20 +804,28 @@ export class GameScene extends Phaser.Scene {
     e.health = e.maxHealth = e.maxHealth * e.hpMul;
   }
 
+  // Boss archetype for a given wave — single source of truth shared by the
+  // wave banner (startWave) and the actual spawn (_spawnBoss). Cycles three
+  // archetypes so every 5th wave isn't the same duel: boss-index 1 (wave 5),
+  // 4 (20), 7 (35)... = slammer; 2 (10), 5 (30)... = caster; 3 (15), 6 (45)...
+  // = juggernaut. Off-context spawns (e.g. the spawnBoss test hook mid-wave-1)
+  // default to slammer.
+  _bossKindForWave(n) {
+    const isRealBossWave = (n % CONFIG.BOSS.WAVE_EVERY === 0);
+    if (!isRealBossWave) return 'slammer';
+    const idx = Math.round(n / CONFIG.BOSS.WAVE_EVERY); // 1,2,3,...
+    const slot = (idx - 1) % 3;                          // 0/1/2
+    return slot === 0 ? 'slammer' : slot === 1 ? 'caster' : 'juggernaut';
+  }
+
   _spawnBoss() {
     const fromLeft = Math.random() < 0.5;
     const x = fromLeft ? CONFIG.WALL_LEFT + 40 : CONFIG.WALL_RIGHT - 40;
-    // cycle three boss archetypes so every climactic wave isn't the same duel:
-    // boss-index 1 (wave 5), 4 (20), 7 (35)... = slammer; index 2 (wave 10),
-    // 5 (30)... = caster; index 3 (wave 15), 6 (45)... = juggernaut. Only real
-    // boss waves (multiples of 5) use the cycle; off-context spawns (e.g. the
-    // spawnBoss test hook mid-wave-1) default to the classic slammer.
-    const isRealBossWave = (this.wave % CONFIG.BOSS.WAVE_EVERY === 0);
-    const idx = Math.round(this.wave / CONFIG.BOSS.WAVE_EVERY); // 1,2,3,...
-    const slot = (idx - 1) % 3;                                 // 0/1/2
-    const variant = isRealBossWave
-      ? (slot === 0 ? 'boss' : slot === 1 ? 'bossCaster' : 'bossJuggernaut')
-      : 'boss';
+    // archetype chosen by the shared helper (above) — keeps the banner + spawn
+    // in sync. The old inline 3-cycle had drifted from startWave's 2-cycle.
+    const kind = this._bossKindForWave(this.wave);
+    const variant = kind === 'caster' ? 'bossCaster'
+      : kind === 'juggernaut' ? 'bossJuggernaut' : 'boss';
     const e = new Enemy(this, x, CONFIG.GROUND_Y, variant);
     e.facing = fromLeft ? 1 : -1;
     e.flankDir = fromLeft ? 1 : -1;
@@ -1539,7 +1551,7 @@ export class GameScene extends Phaser.Scene {
     try { firstSW = !localStorage.getItem('stickman_arena_sw_seen'); } catch (e) {}
     this.ui.floatText(firstSW ? '1 HP \u2014 FIGHT + GRAB HEALTH TO REFORM' : 'SHATTERED', p.x, p.y - 200, '#ff3b30', firstSW ? 26 : 34);
     try { localStorage.setItem('stickman_arena_sw_seen', '1'); } catch (e) {}
-    this.audio && this.audio.gameover && this.audio.bigHit && this.audio.bigHit();
+    this.audio && this.audio.bigHit && this.audio.bigHit();
     // the soundtrack turns desperate during the last stand.
     this.audio && this.audio.setMusicIntensity && this.audio.setMusicIntensity('broken');
   }

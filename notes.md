@@ -1059,3 +1059,50 @@ grind 从 6 皮肤扩到 10。GameScene 记录 bossKills 计数 + reform 标志�
 明显"物体"（带天线/破损等可读轮廓）而非屏幕边缘的板。下轮候选：给不同 zone（Boss 波/事件波）做背景
 色温变化，或加一层视差近景（玩家移动时微动）。
 
+
+## Round E — 首席 QA 审计（找 bug / UX / 平衡 / 移动端 → 排序 → 修 → 测）
+
+以高级 QA 团队视角做发布前审计。读全部核心源码 + 跑 CI(5/5) 与 dev 套件找偏离规格的缺陷。
+
+### 发现并修复的 bug
+
+**Bug A（功能/High）— Boss 横幅名字与实际 Boss 不符（wave 15+）**
+- 根因（源码核实）：`GameScene.startWave` 用 2-循环 `Math.round(n/5)%2` → slammer/caster
+  显示横幅；但 `_spawnBoss` 已用 3-循环 `(idx-1)%3` → slammer/caster/**juggernaut**。Round C
+  加了第三 Boss「Juggernaut」却没更新横幅逻辑。wave 15 横幅说"THE SLAMMER"却刷出"THE JUGGERNAUT"。
+- 修复：提取共享 `_bossKindForWave(n)` 辅助方法，`startWave` 与 `_spawnBoss` 都用它（单一真相源）。
+- 验证：`tests/qa-bugs.spec.js` Bug A — 5/10/15/20/25/30 横幅名+实际刷出一致。
+
+**Bug B（平衡+UX/High）— charger 敌人误用 juggernaut Boss 常量**
+- 根因（源码核实）：`Enemy.js` 有两套 `_startCharge`/`_progressCharge`——第 378/388 行（charger 版，
+  用 `CONFIG.CONTENT.CHARGER`）被第 1052/1058 行（juggernaut Boss 版，用 `CONFIG.BOSS.CHARGE`）
+  **覆盖**（JS 类后定义胜）。结果 charger 敌人冲锋用 Boss 常量：速度 720 vs 620、时长 1.10 vs 0.5、
+  恢复 0.85 vs 0.6，且每次冲锋触发 Boss 级撞墙反馈（重环+punch-zoom+slam 屏震+bigHit 音效）。
+  对普通敌人来说太强且反馈过度。
+- 修复：重命名 Boss 版为 `_startBossCharge`/`_progressBossCharge`；charge 调度按 `this.isBoss` 分流；
+  charger 恢复用自有常量。删除调度里的死代码（第二个 `if (this.charge)`）。
+- 验证：`tests/qa-bugs.spec.js` Bug B×2 — charger 用 CHARGER 常量（windup 0.55、速度 620），
+  juggernaut 用 BOSS 常量（hit 标志、速度 720）。
+
+**Bug C（测试可靠性/Medium）— roundc juggernaut 测试 FPS 敏感超时**
+- 根因：测试用真实时间轮询冲锋阶段；headless Playwright 帧率低（~8-30fps），0.7s windup 实际要 ~5s，
+  超过测试窗口导致 hitsAfter=0 误判失败。bossvariety caster 弹幕测试同样问题。
+- 修复：两处都改为**确定性手动步进**（`b.update(0.03, player)` 固定 dt 循环），脱离帧率依赖，
+  且测试更快更稳。
+
+**Bug D（平衡/High）— Juggernaut 冲锋被摩擦减速**
+- 根因（由 Bug B 回归测试暴露）：`_progressBossCharge` 进入 dash 时没设 `state='run'`，`_physics`
+  第 1197 行对 idle/punch/hurt 状态施加地面摩擦 `vx *= 0.76/帧`。dash 每帧重设 vx=720 后立刻被
+  摩擦砍到 547.2，Boss 实际冲锋速度只有设计的 76%，可能冲不到玩家。charger 版正确设了 `state='run'`。
+- 修复：dash 进入时设 `this.state = 'run'`（镜像 charger）。
+- 验证：`tests/qa-bugs.spec.js` Bug B juggernaut 守卫断言 dashVx===720。
+
+**清理（Low）— `_onEnterBroken` 多余 `this.audio.gameover &&` 检查**
+- 第 1542 行 `this.audio.gameover && this.audio.bigHit && this.audio.bigHit()` 中 `gameover &&` 是
+  死代码（gameover 是真值方法引用，永远真）。简化为 `this.audio.bigHit && this.audio.bigHit()`。
+
+### 验证（实跑，零回归）
+- 新增 `tests/qa-bugs.spec.js`（注册 `qabugs` project）3/3 绿。
+- 官方 CI **5/5 绿**（desktop×3 + 移动横/竖）。
+- bossvariety **4/4 绿**（含修好的 caster 弹幕测试）。
+- roundc **7/7 绿**（含修好的 juggernaut 冲锋测试）。

@@ -58,13 +58,24 @@ test.describe('Boss variety — slammer & caster alternate', () => {
     await page.evaluate(() => window.__test.spawnBossKind('caster'));
     const up = await waitTele(page, (t) => t.bossActive && t.bossKind === 'caster', 8000);
     expect(up).toBeTruthy();
-    // force the special off cooldown and wait for a barrage to release — the
-    // caster lobs shots into the shared ranger-projectile pool.
-    await page.evaluate(() => window.__test.bossFireSpecial());
-    const barraged = await waitTele(page, (t) => t.projectiles > 0, 6000);
-    expect(barraged, 'caster barrage should spawn projectiles').toBeTruthy();
-    expect(barraged.projectiles).toBeGreaterThan(0);
-    await page.screenshot({ path: 'tests/shots/boss-caster-barrage.png' });
+    // Deterministic: drive the boss update at a fixed step so the cast windup
+    // (0.6s game-time) resolves regardless of the headless framerate (the old
+    // real-time poll could time out when fps was low). Force the special off
+    // cooldown, then step until the barrage releases into the projectile pool.
+    const r = await page.evaluate(() => {
+      const s = window.__game.scene.getScene('Game');
+      const b = s.boss; const player = s.player;
+      s.projectiles = [];
+      b.castCd = 0;
+      let fired = false;
+      for (let i = 0; i < 200; i++) {
+        b.update(0.03, player);
+        if (s.projectiles.length > 0) { fired = true; break; }
+      }
+      return { fired, projectiles: s.projectiles.length };
+    });
+    expect(r.fired, 'caster barrage should spawn projectiles').toBe(true);
+    expect(r.projectiles).toBeGreaterThan(0);
     expect(errors).toEqual([]);
   });
 
