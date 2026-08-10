@@ -626,10 +626,15 @@ export class Enemy extends Stickman {
       return;
     }
 
-    // JUGGERNAUT BOSS charge: a telegraphed full-arena dash that takes over the
-    // body once committed (windup -> dash -> recover). Progress before melee AI.
+    // CHARGE state (shared field by the charger enemy + the juggernaut boss).
+    // Route to the right progress method: the juggernaut's full-arena boss dash
+    // (_progressBossCharge, uses BOSS.CHARGE constants + wall-slam payoff) is
+    // distinct from the charger's mini dash (_progressCharge, CHARGER constants).
+    // Both used to share a name and the later definition silently shadowed the
+    // charger's, making every charger hit like a boss — fixed by separate names.
     if (this.charge) {
-      this._progressCharge(dt, player);
+      if (this.isBoss) this._progressBossCharge(dt, player);
+      else this._progressCharge(dt, player);
       this._physics(dt);
       this._render();
       return;
@@ -647,16 +652,6 @@ export class Enemy extends Stickman {
     // RANGER throw windup: a committed lob. Takes priority once started.
     if (this.throw) {
       this._progressThrow(dt, player);
-      this._physics(dt);
-      this._render();
-      return;
-    }
-
-    // CHARGER dash: a committed horizontal charge. Once committed (past windup)
-    // it has hyper-armor and takes over the body until recover — like a mini
-    // boss-slam. Progressed before the melee AI so a started charge always runs.
-    if (this.charge) {
-      this._progressCharge(dt, player);
       this._physics(dt);
       this._render();
       return;
@@ -731,7 +726,7 @@ export class Enemy extends Stickman {
       } else if (this.bossKind === 'juggernaut') {
         this.chargeCd -= dt;
         if (this.onGround && this.chargeCd <= 0 && dist < CONFIG.BOSS.CHARGE.RANGE) {
-          this._startCharge();
+          this._startBossCharge();
           this._physics(dt);
           this._render();
           return;
@@ -1049,13 +1044,16 @@ export class Enemy extends Stickman {
   // max-time safety cap, then pauses in a long recover — the punish window. The
   // counter is to JUMP over the dash (a single read), distinct from the slammer's
   // repeated shockwaves (jump each wave) and the caster's dodgeable barrage.
-  _startCharge() {
+  // Named _startBossCharge / _progressBossCharge (not _startCharge) so the charger
+  // enemy variant keeps its own constants/feedback — earlier they shared a name
+  // and this later definition silently shadowed the charger's.
+  _startBossCharge() {
     this.charge = { phase: 'windup', t: 0, dir: 0, hit: false };
     this.glow = 0;
     this.state = 'idle';
   }
 
-  _progressCharge(dt, player) {
+  _progressBossCharge(dt, player) {
     const a = this.charge;
     const C = CONFIG.BOSS.CHARGE;
     const scene = this.scene;
@@ -1071,6 +1069,10 @@ export class Enemy extends Stickman {
         a.phase = 'dash'; a.t = 0; this.glow = 1;
         this.facing = a.dir;
         this.vx = a.dir * C.SPEED;
+        // state='run' so _physics doesn't apply idle/punch ground friction
+        // (otherwise the dash bleeds ~24% of its speed each frame and the boss
+        // never reaches the designed CHARGE.SPEED, leaving it short of the player).
+        this.state = 'run';
         scene.audio && scene.audio.kick();
         scene.dustBurst && scene.dustBurst(this.x, CONFIG.GROUND_Y, 16);
       }
