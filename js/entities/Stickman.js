@@ -279,7 +279,10 @@ export class Stickman extends Phaser.GameObjects.Graphics {
     this.scaleX = this._baseScaleX * this.squashX;
     this.scaleY = this._baseScaleY * this.squashY;
     const pose = computePose(anim);
-    const p = this.P.bind(this);
+    const facing = this.facing;
+    // local zero-alloc transform: pose points are local (y-up); graphics are
+    // y-down with facing flip. Inlining here (vs this.P.bind(this) + new {x,y}
+    // per call) removes ~20 short-lived objects + 1 bound function per render.
     const pal = this.palette;
     this.clear();
 
@@ -294,16 +297,22 @@ export class Stickman extends Phaser.GameObjects.Graphics {
     const skip = (ka, kb) => !!(mask.dropRightArm && (ka === 'neck' && kb === 'elbowR' || ka === 'elbowR' && kb === 'handR'));
 
     // soft aura behind torso
-    const torso = p(pose.neck);
+    const torsoY = -pose.neck.y;
     this.fillStyle(pal.accent, 0.10 * a);
-    this.fillCircle(torso.x, torso.y + 6, 46);
+    this.fillCircle(pose.neck.x * facing, torsoY + 6, 46);
 
-    const hip = p(pose.hip), neck = p(pose.neck);
+    // SEGMENT DRAW: use lineBetween (zero-allocation) with an inline facing
+    // flip on the raw pose coords, instead of strokeLineShape(new Geom.Line())
+    // which allocated a Line + two {x,y} transform objects PER segment PER frame
+    // (~18 segments × entities × 60fps = a major GC source on mobile crowds).
     const seg2 = (ka, kb, w, col, al) => {
-      const A = p(pose[ka]), B = p(pose[kb]);
+      const pa = pose[ka], pb = pose[kb];
       this.lineStyle(w, col, al);
-      this.strokeLineShape(new Phaser.Geom.Line(A.x, A.y, B.x, B.y));
+      this.lineBetween(pa.x * facing, -pa.y, pb.x * facing, -pb.y);
     };
+    // lightweight point transform for the joint/head/fist/feet fills (no bind;
+    // the segment path above is already zero-allocation via lineBetween).
+    const p = (pt) => ({ x: pt.x * facing, y: -pt.y });
 
     // dark outline pass (pops against bg)
     const seg = (x, y) => { if (skip(x, y)) return; seg2(x, y, lw + 4, 0x05070d, a); };
