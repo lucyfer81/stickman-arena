@@ -1169,3 +1169,45 @@ grind 从 6 皮肤扩到 10。GameScene 记录 bossKills 计数 + reform 标志�
 3. **F — 渲染路径每帧 GC 分配**（PERF，移动端人群时掉帧）
 4. **H+I — 玩家死亡不清理 + 拾取物吸向尸体**（UX+PERF，死亡反馈被破坏）
 5. **C — Boss 下砸 windup 双重摩擦**（gameplay 正确性，Boss 预警期异常停顿）
+
+### Top 5 修复结果（逐一验证）
+
+**Fix #1 — Juggernaut 进场即冲锋（CRITICAL）已上线**
+- 根因：`Enemy.js:163` 的 charger 随机 chargeCd 无条件覆盖了 `:151` 的 boss grace(2.5s)。
+- 修复：charger 随机 cd 仅对非 boss 的 charger 生效（`if variant==='charger' && !isBoss`）。
+- 验证：`tests/qa-bugs.spec.js` Bug F1 — juggernaut 进场 chargeCd>0（≥2.0s grace）；非 boss charger 仍随机。
+  官方 CI 5/5 绿。
+
+**Fix #2 — Kick 打断 Boss 承诺技 + 状态泄漏（HIGH）已上线**
+- 根因：`takeHit` 的 heavy 分支在 boss 承诺超甲检查之前 return，踢打断承诺中的 slam/cast/charge
+  且只清 `attack` 不清特殊状态 → 1 帧抖动后恢复 + vy=-200 篡改 slam 抛物线。
+- 修复：把 boss 承诺超甲（slam/cast/charge 过 windup）移到 heavy 分支之前；伤害仍生效，只豁免击退。
+- 验证：`tests/qa-bugs.spec.js` Bug F2 — 承诺 leap 期被踢：伤害生效但 state≠hurt、slam 存活、vy 不变。
+  官方 CI 5/5 绿。
+
+**Fix #3 — 渲染路径每帧 GC 分配（PERF）已上线**
+- 根因：`Stickman.render` 的 seg2 每次 `new Phaser.Geom.Line()`（~18 次/实体/帧）+ `this.P.bind(this)`
+  + 每次 `{x,y}` 分配。10+ 敌人时移动端 GC pause。
+- 修复：seg2 改 `lineBetween`（零分配）+ 内联 facing 翻转；joint/head/fist 用轻量局部 arrow（去 bind）。
+- 验证：feel14 视觉帧色彩分布不变 + qa-regression 7/7（含尸体/Graphics 泄漏 + 重叠检查）。
+  官方 CI 5/5 绿。
+
+**Fix #4 — 死亡不清理 + 拾取物吸向尸体（UX/PERF）已上线**
+- 根因：Pickup 的 homing 标志置真永不复位 + lock-on 条件不检查 player.dead → 死亡淡出时掉落物
+  飞向尸体（"吸进虚空"）；玩家死后仍可"收集"。Player 死后 alpha 归零仍每帧跑完整 _render。
+- 修复：Pickup 检查 `player.dead` → 释放 homing + 跳过收集；Player alpha 归零后 clear 一次并停止 _render。
+- 验证：`tests/magnet.spec.js` 新用例 — 死亡玩家掉落物 homing=false、collected=false；magnet 4/4 绿。
+  官方 CI 5/5 绿。
+
+**Fix #5 — Boss 下砸 windup 双重摩擦（gameplay）已上线**
+- 根因：`_progressSlam` windup/recover 自己阻尼 vx（rate 8/10），`_physics` 对 state='idle' 再阻尼一次
+  （rate 8）→ 叠加减速，Boss 预警期异常停顿。cast/charge 同病。
+- 修复：`_physics` 在 slam/cast/charge 激活时跳过 idle 摩擦（让特殊技自己的阻尼单独生效）。
+- 验证：`tests/qa-bugs.spec.js` Bug F5 — windup 一步减速比 = 单率 0.76（非旧双率 0.578）。
+  官方 CI 5/5 绿。
+
+### 验证总结
+- 新增回归测试 4 项（qa-bugs F1/F2/F5 + magnet dead-player）全绿。
+- 官方 CI 每个 fix 后 5/5 绿（共 5 次）。
+- dev 套件抽样绿：qabugs 6/6、magnet 4/4、qa-regression 7/7、feel14 视觉帧正常。
+- 零控制台报错（120s 硬核长跑 + 60s 移动 + 签名机制覆盖）。
