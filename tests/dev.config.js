@@ -58,6 +58,7 @@ module.exports = defineConfig({
     project('variety',     /variety.*\.spec\.js/,     90000),
     project('volume',      /volume\.spec\.js/,       30000),
     project('feel14',      /feel14-visual\.spec\.js/, 120000),
+    project('qaaudit',     /qa-audit\.spec\.js/,     180000),
   ],
   webServer: {
     command: 'python3 -m http.server 8080',

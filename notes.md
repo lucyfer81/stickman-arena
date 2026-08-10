@@ -1106,3 +1106,66 @@ grind 从 6 皮肤扩到 10。GameScene 记录 bossKills 计数 + reform 标志�
 - 官方 CI **5/5 绿**（desktop×3 + 移动横/竖）。
 - bossvariety **4/4 绿**（含修好的 caster 弹幕测试）。
 - roundc **7/7 绿**（含修好的 juggernaut 冲锋测试）。
+
+## Round F — 首席 QA/设计师全维度审计（找问题 → 排序 → 修 → 测）
+
+以高级游戏 QA + 设计师视角做发布前全维度审计。基线：官方 CI 5/5 绿。方法：通读全部
+核心源码（GameScene 2362 行 / Enemy 1376 行 / Player / Stickman / UIScene / Pickup）+
+跑 4 场景 Playwright 实测（120s 硬核长跑 / 移动 60s / Boss 行为 / 签名机制）+ 图像分析
+关键帧。零控制台报错（稳定性良好）；发现集中在**正确性 bug + 性能 + UX**。
+
+### 实测遥测（NORMAL，本轮）
+| 场景 | 波 | 分 | 最佳连击 | 终血 | 挨打 | 治疗 |
+|---|---|---|---|---|---|---|
+| 硬核 120s | 5(boss) | 10435 | 29 | 88 | 1 | 0 |
+| 移动 60s | 3 | 3620 | 10 | 100 | 2 | 75 |
+
+硬核 120s 仅挨 1 打到 wave 5（普通波威胁仍偏低，但属既有"技能天花板"设计判断）。
+移动端较 Round 10（860 分/wave2）显著改善（3620 分/wave3/治疗 75）——磁吸+按住连击生效。
+
+### 全维度问题清单
+
+**玩法/正确性**
+- A（CRITICAL）Juggernaut Boss 进场即冲锋、无预警 grace。`Enemy.js:151` 设 `chargeCd=isBoss?2.5:0`，
+  但 `Enemy.js:163` 无条件覆盖 `chargeCd = variant==='charger'?rand(1.6,3.0):0`。bossJuggernaut
+  （isBoss=true 但 variant≠'charger'）chargeCd 最终=0，进场在 RANGE 内第 1 帧就冲锋。
+- B（HIGH）Kick（heavy）打断 Boss 承诺中的特殊技 + 状态泄漏。`takeHit` 的 heavy 分支
+  （254-261 行）在 Boss 超甲检查（266-276 行）**之前** return。注释声明 Boss 承诺后
+  "除死亡外不可打断"，但一记踢就清 `this.attack`+击退+`state='hurt'`，且**没清**
+  `slam/cast/charge` → 下一帧 update 把状态拉回 slam（hurt 只闪 1 帧，视觉抖动），
+  `vy=-200` 还会切断 slam 抛物线、人为操纵冲击波位置。
+- C（gameplay）Boss 下砸 windup 双重摩擦。`_progressSlam` windup 设 `state='idle'`（941 行），
+  `_physics` 对 idle 再施摩擦（1201 行）→ windup 每帧被减速两次，Boss 停得比设计更死。
+
+**平衡**
+- D（MEDIUM）普通波威胁对硬核仍偏低（120s/1 挨打）—— 既有"技能天花板"判断，本轮不改。
+- E（LOW）拳无空挥惩罚但踢有 —— 设计意图（拳=安全起手），不改。
+
+**性能**
+- F（MEDIUM）渲染路径每帧 GC 分配：`Stickman.seg2` 每次 `new Phaser.Geom.Line()`（每实体每帧
+  ~18 次）+ `computePose` 每次分配 ~11 个 {x,y} 子对象 + `this.P.bind(this)` 每帧新函数。
+  10+ 敌人时单帧数百短命对象 → 移动端 GC pause。最大杠杆：改 `lineBetween`（零分配）。
+- G（LOW）敌人 `_physics` O(n²) 分离循环（_sepNudge + _hardSeparate）每帧每敌跑两次。
+- H（UX/PERF）玩家死亡后永不 `_destroy`（对比 Enemy 有 `deadT>=1 → _destroy`），alpha 归零后
+  仍每帧跑完整 `_render`+`_physics` 空转到场景切换。
+- I（UX）Pickup 磁吸一旦开启永不关闭，玩家死亡淡出期间掉落物仍朝尸体飞（"吸进虚空"视觉）。
+
+**视觉**
+- J（LOW）背景被图像分析读为"静态" —— Round D 已做分层深度，但单帧看不出飘浮余烬。不改。
+
+**移动端**
+- K（已缓解）按钮大小/按住连击已 shipped（Round 10/12）；图像分析指出底部按钮有手掌误触
+  风险但间距已缓解。
+
+**PC**
+- L（已完成）可重绑控制 + 选项菜单已 shipped（Round C）。
+
+**流程**
+- 良好：测试覆盖厚（109+）、遥测全、notes 纪律好。无重大流程问题。
+
+### Top 5（按影响排序，本轮全修）
+1. **A — Juggernaut 进场即冲锋**（CRITICAL 正确性，Boss 战被破坏，无预警命中=不公平）
+2. **B — Kick 打断 Boss 承诺技 + 状态泄漏**（HIGH 正确性+视觉，Boss 战被踢spam平凡化）
+3. **F — 渲染路径每帧 GC 分配**（PERF，移动端人群时掉帧）
+4. **H+I — 玩家死亡不清理 + 拾取物吸向尸体**（UX+PERF，死亡反馈被破坏）
+5. **C — Boss 下砸 windup 双重摩擦**（gameplay 正确性，Boss 预警期异常停顿）

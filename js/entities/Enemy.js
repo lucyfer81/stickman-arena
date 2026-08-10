@@ -159,8 +159,13 @@ export class Enemy extends Stickman {
     this.throwCd = rand(1.0, 2.0);
     this.throw = null;     // { phase: 'windup'|'recover', t, windup }
     // charger dash state — a committed horizontal charge (mini boss-pattern).
-    this.charge = null;    // { phase: 'windup'|'dash'|'recover', t, dir }
-    this.chargeCd = this.variant === 'charger' ? rand(1.6, 3.0) : 0;
+    // NOTE: this.charge is already initialised above (line ~148) with the full
+    // schema { phase, t, dir, hit }. Only the non-boss CHARGER variant gets a
+    // randomized cooldown here — the boss (juggernaut) keeps the grace period
+    // set above so it doesn't charge on frame 1 with no telegraph.
+    if (this.variant === 'charger' && !this.isBoss) {
+      this.chargeCd = rand(1.6, 3.0);
+    }
     // medic support state — channels a heal pulse to the lowest-HP nearby ally.
     this.heal = null;      // { phase: 'windup'|'recover', t, target }
     this.healCd = this.variant === 'medic' ? rand(2.0, 3.5) : 0;

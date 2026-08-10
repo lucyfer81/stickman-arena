@@ -143,6 +143,42 @@ test.describe('QA bug regressions', () => {
     expect(r.dashVx).not.toBe(r.chargerSpeed);
     expect(errors).toEqual([]);
   });
+
+  test('Bug F1: juggernaut boss spawns with a charge grace period (not 0)', async ({ page }) => {
+    test.setTimeout(25000);
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await startGame(page);
+    const r = await page.evaluate(() => {
+      const s = window.__game.scene.getScene('Game');
+      // spawn a juggernaut fresh and read its constructor-set chargeCd BEFORE
+      // any update tick. The old double-init overwrote the 2.5s grace with 0,
+      // so the boss charged on frame 1 with no telegraph.
+      window.__test.clearEnemies();
+      const kind = window.__test.spawnBossKind('juggernaut');
+      const b = s.boss;
+      return {
+        kind,
+        chargeCdAtSpawn: b.chargeCd,
+        // slam/cast keep their grace — charge must too (parity)
+        slamCdAtSpawn: b.slamCd,
+        castCdAtSpawn: b.castCd,
+      };
+    });
+    expect(r.kind).toBe('juggernaut');
+    // the grace is 2.5s — must be > 0 so the windup telegraph can play
+    expect(r.chargeCdAtSpawn, 'juggernaut chargeCd must have a grace (>0) at spawn').toBeGreaterThan(0);
+    expect(r.chargeCdAtSpawn).toBeGreaterThanOrEqual(2.0);
+    // charger variant (non-boss) still gets its randomized cd, not the boss grace
+    const r2 = await page.evaluate(() => {
+      window.__test.clearEnemies();
+      const e = window.__test.spawnVariant('charger', 320);
+      return { variant: e.variant, isBoss: e.isBoss, chargeCd: e.chargeCd };
+    });
+    expect(r2.isBoss).toBe(false);
+    expect(r2.chargeCd, 'non-boss charger keeps randomized cd').toBeGreaterThan(0);
+    expect(errors).toEqual([]);
+  });
 });
 
 // local mirror of CONFIG.BOSS.NAME so the test file is self-contained
