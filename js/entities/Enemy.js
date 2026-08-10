@@ -255,6 +255,24 @@ export class Enemy extends Stickman {
     // a kill always applies, regardless of armor
     if (this.health <= 0) { this._die(dir); return true; }
 
+    // BOSS super-armor: once a boss commits to its special (past the telegraph
+    // windup), it cannot be interrupted by anything short of death — not even a
+    // heavy kick. Damage still applies (subtracted above); only the flinch/
+    // knockback is suppressed. This MUST run before the heavy branch below,
+    // otherwise a kick breaks the commitment AND leaks the slam/cast/charge
+    // state (cleared attack but not the special) → 1-frame flinch then resume +
+    // vy=-200 warps the slam leap arc. For the slammer that's leap+recover; for
+    // the caster, barrage release+recover; for the juggernaut, the locked dash.
+    if (this.isBoss && this.slam && this.slam.phase !== 'windup') {
+      return true;
+    }
+    if (this.isBoss && this.cast && this.cast.phase !== 'windup') {
+      return true;
+    }
+    if (this.isBoss && this.charge && this.charge.phase === 'dash') {
+      return true;
+    }
+
     const phase = this.attack && this.attack.phase;
     if (heavy) {
       // heavy hits break anything except a kill — full knockback + flinch.
@@ -262,21 +280,6 @@ export class Enemy extends Stickman {
       this.attack = null; this.glow = 0;
       this.vx = dir * kb; this.vy = -200; this.onGround = false; this.facing = -dir;
       this.state = 'hurt'; this.hurtTime = 0;
-      return true;
-    }
-    // BOSS super-armor: once a boss commits to its special (past the telegraph
-    // windup), it cannot be interrupted by anything short of death. For the
-    // slammer that's the leap+recover; for the caster, the barrage release+
-    // recover. The telegraphed counter is to dodge the attack, not stagger it.
-    if (this.isBoss && this.slam && this.slam.phase !== 'windup') {
-      return true;
-    }
-    if (this.isBoss && this.cast && this.cast.phase !== 'windup') {
-      return true;
-    }
-    // JUGGERNAUT charge: once the dash locks in, it cannot be interrupted — the
-    // counter is to JUMP over it, not stagger it (mirrors slam/cast armor).
-    if (this.isBoss && this.charge && this.charge.phase === 'dash') {
       return true;
     }
     // CHARGER commitment: once the dash locks in, light hits can't shove it off

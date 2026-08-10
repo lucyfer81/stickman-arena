@@ -179,6 +179,55 @@ test.describe('QA bug regressions', () => {
     expect(r2.chargeCd, 'non-boss charger keeps randomized cd').toBeGreaterThan(0);
     expect(errors).toEqual([]);
   });
+
+  test('Bug F2: heavy hit cannot interrupt a committed boss special (super-armor)', async ({ page }) => {
+    test.setTimeout(25000);
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await startGame(page);
+    const r = await page.evaluate(() => {
+      const s = window.__game.scene.getScene('Game');
+      const C = window.__config;
+      window.__test.clearEnemies();
+      window.__test.spawnBossKind('slammer');
+      const b = s.boss;
+      b.slamCd = 0;
+      const player = s.player;
+      // step through windup into the committed leap phase
+      let inLeap = false;
+      for (let i = 0; i < 80; i++) {
+        b.update(0.03, player);
+        if (b.slam && b.slam.phase === 'leap') { inLeap = true; break; }
+      }
+      if (!inLeap) return { error: 'never reached leap' };
+      const hpBefore = b.health;
+      const vyBeforeLeap = b.vy;
+      const slamBefore = b.slam ? b.slam.phase : null;
+      // now land a HEAVY kick (kb > 400) mid-leap — armor must hold
+      b.takeHit(20, b.x - 200, 560, 0.085);
+      return {
+        inLeap,
+        hpBefore, hpAfter: b.health,
+        damageApplied: b.health < hpBefore,
+        // armor: NOT flinched
+        stateAfter: b.state,
+        notHurt: b.state !== 'hurt',
+        // armor: slam state survives (no leak)
+        slamAfter: b.slam ? b.slam.phase : null,
+        slamSurvived: !!b.slam,
+        // armor: vy NOT overwritten to -200 (leap arc preserved)
+        vyAfter: b.vy,
+        vyPreserved: Math.abs(b.vy - vyBeforeLeap) < 1,
+      };
+    });
+    expect(r.inLeap, 'reached committed leap phase').toBe(true);
+    expect(r.damageApplied, 'damage still applies through armor').toBe(true);
+    expect(r.notHurt, 'committed boss does not enter hurt state from a kick').toBe(true);
+    expect(r.slamSurvived, 'slam state survives a heavy hit (no leak)').toBe(true);
+    expect(r.slamAfter).toBe('leap');
+    expect(r.vyPreserved, 'leap arc vy preserved (not warped to -200)').toBe(true);
+    expect(errors).toEqual([]);
+  });
 });
 
 // local mirror of CONFIG.BOSS.NAME so the test file is self-contained
